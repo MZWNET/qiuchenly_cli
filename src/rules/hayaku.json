@@ -1,0 +1,316 @@
+{
+  "schemaVersion": 1,
+  "version": "2026.11.14.1",
+  "rules": [
+    {
+      "path": "~/Library/Caches",
+      "deep": 1,
+      "filters": [
+        { "deep": 1, "group": "caches" }
+      ]
+    },
+    {
+      "path": "~/Library/Preferences",
+      "deep": 1,
+      "filters": [
+        { "deep": 1, "type": "file", "nameSuffix": ".plist", "group": "preferences" }
+      ]
+    },
+    {
+      "path": "~/Library/Preferences/ByHost",
+      "deep": 1,
+      "filters": [
+        { "deep": 1, "type": "file", "nameSuffix": ".plist", "group": "preferences" }
+      ]
+    },
+    {
+      "path": "~/Library/Saved Application State",
+      "deep": 1,
+      "filters": [
+        { "deep": 1, "nameSuffix": ".savedState", "group": "containers" }
+      ]
+    },
+    {
+      "path": "~/Library/Containers",
+      "deep": 1,
+      "filters": [
+        { "deep": 1, "group": "containers" }
+      ]
+    },
+    {
+      "path": "~/Library/Group Containers",
+      "deep": 1,
+      "filters": [
+        { "deep": 1, "group": "containers" }
+      ]
+    },
+    {
+      "path": "~/Library/Application Support",
+      "deep": 2,
+      "filters": [
+        { "deep": 1, "group": "application-support" },
+        { "deep": 2, "namePrefix": "com.", "group": "application-support" }
+      ]
+    },
+    {
+      "path": "~/Library/Application Scripts",
+      "deep": 1,
+      "filters": [
+        { "deep": 1, "namePrefix": "com.", "group": "application-support" },
+        { "deep": 1, "namePrefix": "org.", "group": "application-support" }
+      ]
+    },
+    {
+      "path": "~/Library/Logs",
+      "deep": 2,
+      "filters": [
+        { "deep": 1, "group": "logs" },
+        { "deep": 2, "namePrefix": "com.", "group": "logs" }
+      ]
+    },
+    {
+      "path": "~/Library/Logs/DiagnosticReports",
+      "deep": 1,
+      "filters": [
+        { "deep": 1, "type": "file", "group": "crash-reports" }
+      ]
+    },
+    {
+      "path": "~/Library/Application Support/CrashReporter",
+      "deep": 1,
+      "filters": [
+        { "deep": 1, "group": "crash-reports" }
+      ]
+    },
+    {
+      "path": "~/Library/HTTPStorages",
+      "deep": 1,
+      "filters": [
+        { "deep": 1, "group": "caches" }
+      ]
+    },
+    {
+      "path": "~/Library/WebKit",
+      "deep": 1,
+      "filters": [
+        { "deep": 1, "group": "caches" }
+      ]
+    },
+    {
+      "path": "~/Library/Cookies",
+      "deep": 1,
+      "filters": [
+        { "deep": 1, "type": "file", "group": "cookies" }
+      ]
+    },
+    {
+      "path": "~/Library/LaunchAgents",
+      "deep": 1,
+      "filters": [
+        { "deep": 1, "type": "file", "nameSuffix": ".plist", "group": "login-items" }
+      ]
+    },
+    {
+      "path": "~/Library/PreferencePanes",
+      "deep": 1,
+      "filters": [
+        { "deep": 1, "type": "package", "group": "preference-panes" }
+      ]
+    },
+    {
+      "path": "~/Library/QuickLook",
+      "deep": 1,
+      "filters": [
+        { "deep": 1, "type": "package", "group": "plugins" }
+      ]
+    },
+    {
+      "path": "~/Library/Spotlight",
+      "deep": 1,
+      "filters": [
+        { "deep": 1, "type": "package", "group": "plugins" }
+      ]
+    },
+    {
+      "path": "~/Library/Services",
+      "deep": 1,
+      "filters": [
+        { "deep": 1, "type": "package", "group": "plugins" }
+      ]
+    },
+    {
+      "path": "~/Library/Internet Plug-Ins",
+      "deep": 1,
+      "filters": [
+        { "deep": 1, "type": "package", "group": "plugins" }
+      ]
+    },
+    {
+      "path": "~/Library/Audio/Plug-Ins",
+      "deep": 2,
+      "filters": [
+        { "deep": 2, "type": "package", "group": "plugins" }
+      ]
+    },
+    {
+      "path": "~/Library/Frameworks",
+      "deep": 1,
+      "filters": [
+        { "deep": 1, "type": "package", "group": "library" }
+      ]
+    },
+    {
+      "path": "~/Library/PrivilegedHelperTools",
+      "deep": 1,
+      "filters": [
+        { "deep": 1, "group": "binaries" }
+      ]
+    },
+    {
+      "path": "~/Library/InstallerSandboxes",
+      "deep": 1,
+      "filters": [
+        { "deep": 1, "namePrefix": "com.", "group": "caches" }
+      ]
+    },
+    {
+      "path": "/Library/Application Support",
+      "deep": 2,
+      "filters": [
+        { "deep": 1, "group": "application-support" },
+        { "deep": 2, "namePrefix": "com.", "group": "application-support" }
+      ]
+    },
+    {
+      "path": "/Library/Caches",
+      "deep": 1,
+      "filters": [
+        { "deep": 1, "group": "caches" }
+      ]
+    },
+    {
+      "path": "/Library/Preferences",
+      "deep": 1,
+      "filters": [
+        { "deep": 1, "type": "file", "nameSuffix": ".plist", "group": "preferences" }
+      ]
+    },
+    {
+      "path": "/Library/LaunchAgents",
+      "deep": 1,
+      "filters": [
+        { "deep": 1, "type": "file", "nameSuffix": ".plist", "group": "login-items" }
+      ]
+    },
+    {
+      "path": "/Library/LaunchDaemons",
+      "deep": 1,
+      "filters": [
+        { "deep": 1, "type": "file", "nameSuffix": ".plist", "group": "login-items" }
+      ]
+    },
+    {
+      "path": "/Library/PrivilegedHelperTools",
+      "deep": 1,
+      "filters": [
+        { "deep": 1, "group": "binaries" }
+      ]
+    },
+    {
+      "path": "/Library/PreferencePanes",
+      "deep": 1,
+      "filters": [
+        { "deep": 1, "type": "package", "group": "preference-panes" }
+      ]
+    },
+    {
+      "path": "/Library/Frameworks",
+      "deep": 1,
+      "filters": [
+        { "deep": 1, "type": "package", "group": "library" }
+      ]
+    },
+    {
+      "path": "/Library/Internet Plug-Ins",
+      "deep": 1,
+      "filters": [
+        { "deep": 1, "type": "package", "group": "plugins" }
+      ]
+    },
+    {
+      "path": "/Library/Audio/Plug-Ins",
+      "deep": 2,
+      "filters": [
+        { "deep": 2, "type": "package", "group": "plugins" }
+      ]
+    },
+    {
+      "path": "/Library/ScriptingAdditions",
+      "deep": 1,
+      "filters": [
+        { "deep": 1, "type": "package", "group": "plugins" }
+      ]
+    },
+    {
+      "path": "/private/var/db/receipts",
+      "deep": 1,
+      "filters": [
+        { "deep": 1, "type": "file", "namePrefix": "com.", "group": "library" }
+      ]
+    }
+  ],
+  "domains": {},
+  "protection": {
+    "skipPaths": [
+      "~/Library/Mobile Documents",
+      "~/Library/CloudStorage",
+      "~/Library/Application Support/AddressBook",
+      "~/Library/Application Support/com.apple.sharedfilelist",
+      "~/Library/Keychains",
+      "~/Library/Safari",
+      "~/Library/Mail",
+      "~/Library/Messages",
+      "~/Library/Photos",
+      "~/Library/Application Support/FileProvider",
+      "~/Library/Application Support/com.apple.TCC",
+      "~/Library/Containers/com.apple.mail",
+      "~/Library/Containers/com.apple.Photos",
+      "~/Library/Group Containers/group.com.apple.notes"
+    ],
+    "dataProtectedBundles": [
+      "com.apple.*",
+      "com.microsoft.*",
+      "com.adobe.*",
+      "com.google.*",
+      "com.jetbrains.*",
+      "com.docker.*",
+      "com.valvesoftware.*"
+    ],
+    "commonWords": [
+      "Applications", "Desktop", "Documents", "Downloads", "Library", "Movies",
+      "Music", "Pictures", "Projects", "Workspace", "Public", "Users", "Volumes",
+      "Adobe", "Dropbox", "Google", "Homebrew", "Microsoft", "OneDrive", "Steam",
+      "Discord", "Slack", "Spotify", "Xcode", "Zoom"
+    ]
+  },
+  "officialUninstallers": [
+    {
+      "vendor": "Adobe Creative Cloud",
+      "bundlePrefixes": ["com.adobe.acc", "com.adobe.creativecloud"],
+      "nameFragments": ["adobe creative cloud"],
+      "reason": "请使用 Adobe Creative Cloud 自带的卸载器，避免破坏共享组件"
+    },
+    {
+      "vendor": "Microsoft Office",
+      "bundlePrefixes": ["com.microsoft.Word", "com.microsoft.Excel", "com.microsoft.Powerpoint", "com.microsoft.Outlook"],
+      "nameFragments": ["microsoft word", "microsoft excel", "microsoft powerpoint", "microsoft outlook"],
+      "reason": "请使用 Microsoft 官方卸载器，避免破坏共享的 Office 组件"
+    },
+    {
+      "vendor": "Steam",
+      "bundlePrefixes": ["com.valvesoftware.steam"],
+      "nameFragments": ["steam"],
+      "reason": "请使用 Steam 客户端卸载，避免误删游戏库"
+    }
+  ]
+}
