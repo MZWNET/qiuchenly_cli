@@ -8,6 +8,7 @@
   git-hooks.hooks = {
     rustfmt.enable = true;
     clippy.enable = true;
+    alejandra.enable = true;
   };
 
   packages = with pkgs; [
@@ -21,5 +22,6 @@
     rustfmt --version
     clippy-driver --version
     rust-analyzer --version
+    alejandra --version
   '';
 }

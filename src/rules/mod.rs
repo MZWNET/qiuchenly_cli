@@ -120,13 +120,7 @@ fn save_rules(doc: &RuleDoc, origin: &str) -> Result<()> {
 /// 从云端拉订阅合集并合成规则文档（原版 syncToLocal 流程）
 pub async fn sync() -> Result<()> {
     let client = crate::store::client::Client::authenticated()?;
-    let raw = client
-        .get_json("/uninstall-rules/subscriptions/me", &[])
-        .await?;
-    let subs: Vec<serde_json::Value> = match raw {
-        serde_json::Value::Array(a) => a,
-        v => vec![v],
-    };
+    let subs = client.uninstall_rule_subscriptions().await?;
     if subs.is_empty() {
         println!("云端没有已订阅的规则合集，保留本地规则");
         return Ok(());
@@ -138,18 +132,8 @@ pub async fn sync() -> Result<()> {
         .iter()
         .filter_map(|s| s.get("id").and_then(|v| v.as_str()).map(String::from))
         .collect();
-    let composed: serde_json::Value = client
-        .post(
-            "/uninstall-rules/compose",
-            &serde_json::json!({ "collectionIds": ids }),
-        )
-        .await?;
-    let doc: RuleDoc = serde_json::from_value(
-        composed
-            .get("document")
-            .cloned()
-            .context("合成结果缺少 document")?,
-    )?;
+    let composed = client.compose_uninstall_rules(&ids).await?;
+    let doc: RuleDoc = serde_json::from_value(composed)?;
     save_rules(&doc, "server")
 }
 

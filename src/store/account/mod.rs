@@ -1,9 +1,32 @@
-use super::client::Client;
+mod models;
+
+pub use models::{LoginResponse, PublicKey, User};
+
 use crate::config;
 use anyhow::{Context, Result};
 use base64::Engine;
 use rsa::pkcs8::DecodePublicKey;
 use rsa::{Oaep, RsaPublicKey};
+
+use super::client::Client;
+
+impl Client {
+    pub async fn public_key(&self) -> Result<PublicKey> {
+        self.get("/auth/public-key", &[]).await
+    }
+
+    pub async fn login(&self, username: &str, encrypted_password: &str) -> Result<LoginResponse> {
+        self.post(
+            "/auth/login",
+            &serde_json::json!({ "username": username, "password": encrypted_password }),
+        )
+        .await
+    }
+
+    pub async fn user(&self) -> Result<User> {
+        self.get("/auth/user", &[]).await
+    }
+}
 
 pub async fn login(username: &str, password: &str) -> Result<()> {
     let client = Client::new(None)?;

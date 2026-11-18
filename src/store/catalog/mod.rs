@@ -1,7 +1,65 @@
+mod models;
+
+pub use models::{
+    AppVersion, CatalogList, Category, CategoryApps, GuiUpdate, Popular, PopularBind,
+};
+
 use super::client::Client;
-use super::models::AppVersion;
 use crate::macos::apps::scan_installed_apps;
 use anyhow::{Context, Result};
+
+impl Client {
+    pub async fn search(&self, keyword: &str, page: u32, size: u32) -> Result<CatalogList> {
+        self.get(
+            "/catalog/entries",
+            &[
+                ("page", page.to_string()),
+                ("size", size.to_string()),
+                ("search", keyword.to_string()),
+            ],
+        )
+        .await
+    }
+
+    pub async fn categories(&self) -> Result<Vec<Category>> {
+        self.get("/public/category-dictionary", &[]).await
+    }
+
+    pub async fn category_apps(
+        &self,
+        key: &str,
+        page: u32,
+        size: u32,
+        search: Option<&str>,
+    ) -> Result<CategoryApps> {
+        let mut query = vec![("page", page.to_string()), ("size", size.to_string())];
+        if let Some(search) = search {
+            query.push(("search", search.to_string()));
+        }
+
+        self.get(&format!("/public/category-dictionary/{key}/apps"), &query)
+            .await
+    }
+
+    pub async fn app_versions(&self, bundle_id: &str) -> Result<Vec<AppVersion>> {
+        self.get(&format!("/appinfo/versions/{bundle_id}"), &[])
+            .await
+    }
+
+    pub async fn popular(&self) -> Result<Vec<PopularBind>> {
+        let data: Popular = self.get("/public/popular-downloads", &[]).await?;
+
+        Ok(data.binds)
+    }
+
+    pub async fn check_gui_update(&self, version: &str) -> Result<GuiUpdate> {
+        self.get(
+            &format!("/public/checkGuiAppUpdate/{version}"),
+            &[("updateCheckType", "beta".into())],
+        )
+        .await
+    }
+}
 
 fn select_bundle_id<'a>(
     app: &str,

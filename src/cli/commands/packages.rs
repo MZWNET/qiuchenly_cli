@@ -1,15 +1,14 @@
 use anyhow::Result;
 use std::path::Path;
 
-use crate::config;
-use crate::download::{self, aria2::Downloader};
+use crate::packages::{self, aria2::Downloader};
 use crate::store::{
     catalog::{resolve_bundle_id, resolve_version},
     client::Client,
     community,
 };
 
-use super::args::{OutputArgs, TransferArgs};
+use super::super::args::{OutputArgs, TransferArgs};
 
 pub async fn download(
     app: &str,
@@ -23,7 +22,7 @@ pub async fn download(
         println!("{}", version.url);
     } else {
         let downloader = Downloader::new(output.transfer.aria2c);
-        let path = download::download_app(
+        let path = packages::download_app(
             &client,
             &downloader,
             app,
@@ -46,7 +45,7 @@ pub async fn install(
 ) -> Result<()> {
     let client = Client::from_config()?;
     let downloader = Downloader::new(transfer.aria2c);
-    let path = download::install_app(&client, &downloader, app, version, appdir, keep).await?;
+    let path = packages::install_app(&client, &downloader, app, version, appdir, keep).await?;
     println!("安装完成: {}", path.display());
 
     Ok(())
@@ -95,15 +94,14 @@ pub async fn community_download(
     let client = Client::authenticated()?;
     let bundle_id = resolve_bundle_id(&client, app).await?;
     let file = community::resolve_download(&client, &bundle_id, release, arch, attachment).await?;
-    let output_dir = match output.output_dir {
-        Some(path) => path,
-        None => config::download_dir(&config::load()?)?,
-    };
-    std::fs::create_dir_all(&output_dir)?;
     let downloader = Downloader::new(output.transfer.aria2c);
-    let path = downloader
-        .download(&file.url, &output_dir, file.file_name.as_deref())
-        .await?;
+    let path = packages::download_file(
+        &downloader,
+        &file.url,
+        output.output_dir.as_deref(),
+        file.file_name.as_deref(),
+    )
+    .await?;
     println!("下载完成: {}", path.display());
 
     Ok(())

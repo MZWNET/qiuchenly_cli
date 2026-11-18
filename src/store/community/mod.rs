@@ -1,6 +1,31 @@
+mod models;
+
+pub use models::{UserAppDownload, UserAppPackage, UserAppRelease};
+
 use super::client::Client;
-use super::models::{UserAppDownload, UserAppPackage};
 use anyhow::{Context, Result};
+
+impl Client {
+    pub async fn user_app_publishers(&self, bundle_id: &str) -> Result<Vec<UserAppRelease>> {
+        self.get(
+            "/user-apps/publishers",
+            &[("bundleId", bundle_id.to_string())],
+        )
+        .await
+    }
+
+    pub async fn user_app_download(
+        &self,
+        release_id: &str,
+        file_id: &str,
+    ) -> Result<UserAppDownload> {
+        self.post(
+            &format!("/user-apps/{release_id}/download-url"),
+            &serde_json::json!({ "fileId": file_id }),
+        )
+        .await
+    }
+}
 
 fn select_package<'a>(
     packages: &'a [UserAppPackage],

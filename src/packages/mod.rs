@@ -8,6 +8,20 @@ use aria2::Downloader;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub async fn download_file(
+    downloader: &Downloader,
+    url: &str,
+    output_dir: Option<&Path>,
+    file_name: Option<&str>,
+) -> Result<PathBuf> {
+    let dir = match output_dir {
+        Some(dir) => dir.to_path_buf(),
+        None => config::download_dir(&config::load()?)?,
+    };
+    fs::create_dir_all(&dir).with_context(|| format!("创建下载目录 {}", dir.display()))?;
+    downloader.download(url, &dir, file_name).await
+}
+
 pub async fn download_app(
     client: &Client,
     downloader: &Downloader,
@@ -16,12 +30,7 @@ pub async fn download_app(
     output_dir: Option<&Path>,
 ) -> Result<PathBuf> {
     let (_, version) = catalog::resolve_version(client, app, version).await?;
-    let dir = match output_dir {
-        Some(dir) => dir.to_path_buf(),
-        None => config::download_dir(&config::load()?)?,
-    };
-    fs::create_dir_all(&dir).with_context(|| format!("创建下载目录 {}", dir.display()))?;
-    downloader.download(&version.url, &dir, None).await
+    download_file(downloader, &version.url, output_dir, None).await
 }
 
 pub async fn install_app(

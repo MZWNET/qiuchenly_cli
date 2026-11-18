@@ -1,8 +1,8 @@
 mod cli;
 mod config;
-mod download;
 mod inject;
 mod macos;
+mod packages;
 mod rules;
 mod store;
 mod uninstall;

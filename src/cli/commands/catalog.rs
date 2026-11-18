@@ -6,7 +6,7 @@ use crate::store::{
     client::Client,
 };
 
-use super::args::PageArgs;
+use super::super::args::PageArgs;
 
 fn trunc(s: &str, n: usize) -> String {
     let mut chars = s.chars();

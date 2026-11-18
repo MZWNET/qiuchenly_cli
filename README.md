@@ -30,6 +30,8 @@ cargo install --path .
 
 - Automated builds are also available via GitHub Actions.
 
+- Nix: `nix profile add github:MZWNET/qiuchenly_cli`, or use the flake's `overlays.default` (`pkgs.qiuchenly-cli`).
+
 ## Common Commands
 
 ```sh

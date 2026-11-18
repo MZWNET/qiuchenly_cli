@@ -1,7 +1,3 @@
-use super::models::{
-    AppVersion, CatalogList, Category, CategoryApps, GuiUpdate, LoginResponse, Popular,
-    PopularBind, PublicKey, User, UserAppDownload, UserAppRelease,
-};
 use crate::config;
 use anyhow::Result;
 use serde::de::DeserializeOwned;
@@ -62,7 +58,11 @@ impl Client {
         Self::new(Some(token))
     }
 
-    async fn get<T: DeserializeOwned>(&self, path: &str, query: &[(&str, String)]) -> Result<T> {
+    pub(super) async fn get<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        query: &[(&str, String)],
+    ) -> Result<T> {
         let resp: Envelope<T> = self
             .http
             .get(format!("{DEFAULT_BASE}{path}"))
@@ -76,15 +76,11 @@ impl Client {
         resp.into_result()
     }
 
-    pub async fn get_json(
+    pub(super) async fn post<B: Serialize, T: DeserializeOwned>(
         &self,
         path: &str,
-        query: &[(&str, String)],
-    ) -> Result<serde_json::Value> {
-        self.get(path, query).await
-    }
-
-    pub async fn post<B: Serialize, T: DeserializeOwned>(&self, path: &str, body: &B) -> Result<T> {
+        body: &B,
+    ) -> Result<T> {
         let raw = self
             .http
             .post(format!("{DEFAULT_BASE}{path}"))
@@ -97,92 +93,5 @@ impl Client {
         let resp: Envelope<T> = raw.error_for_status()?.json().await?;
 
         resp.into_result()
-    }
-
-    pub async fn search(&self, keyword: &str, page: u32, size: u32) -> Result<CatalogList> {
-        self.get(
-            "/catalog/entries",
-            &[
-                ("page", page.to_string()),
-                ("size", size.to_string()),
-                ("search", keyword.to_string()),
-            ],
-        )
-        .await
-    }
-
-    pub async fn categories(&self) -> Result<Vec<Category>> {
-        self.get("/public/category-dictionary", &[]).await
-    }
-
-    pub async fn category_apps(
-        &self,
-        key: &str,
-        page: u32,
-        size: u32,
-        search: Option<&str>,
-    ) -> Result<CategoryApps> {
-        let mut query = vec![("page", page.to_string()), ("size", size.to_string())];
-        if let Some(search) = search {
-            query.push(("search", search.to_string()));
-        }
-
-        self.get(&format!("/public/category-dictionary/{key}/apps"), &query)
-            .await
-    }
-
-    pub async fn app_versions(&self, bundle_id: &str) -> Result<Vec<AppVersion>> {
-        self.get(&format!("/appinfo/versions/{bundle_id}"), &[])
-            .await
-    }
-
-    pub async fn popular(&self) -> Result<Vec<PopularBind>> {
-        let data: Popular = self.get("/public/popular-downloads", &[]).await?;
-
-        Ok(data.binds)
-    }
-
-    pub async fn check_gui_update(&self, version: &str) -> Result<GuiUpdate> {
-        self.get(
-            &format!("/public/checkGuiAppUpdate/{version}"),
-            &[("updateCheckType", "beta".into())],
-        )
-        .await
-    }
-
-    pub async fn public_key(&self) -> Result<PublicKey> {
-        self.get("/auth/public-key", &[]).await
-    }
-
-    pub async fn login(&self, username: &str, encrypted_password: &str) -> Result<LoginResponse> {
-        self.post(
-            "/auth/login",
-            &serde_json::json!({ "username": username, "password": encrypted_password }),
-        )
-        .await
-    }
-
-    pub async fn user(&self) -> Result<User> {
-        self.get("/auth/user", &[]).await
-    }
-
-    pub async fn user_app_publishers(&self, bundle_id: &str) -> Result<Vec<UserAppRelease>> {
-        self.get(
-            "/user-apps/publishers",
-            &[("bundleId", bundle_id.to_string())],
-        )
-        .await
-    }
-
-    pub async fn user_app_download(
-        &self,
-        release_id: &str,
-        file_id: &str,
-    ) -> Result<UserAppDownload> {
-        self.post(
-            &format!("/user-apps/{release_id}/download-url"),
-            &serde_json::json!({ "fileId": file_id }),
-        )
-        .await
     }
 }

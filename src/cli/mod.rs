@@ -1,9 +1,8 @@
-mod account;
 mod args;
-mod catalog;
-mod packages;
+mod commands;
 
 pub use args::Cli;
+pub use commands::{account, catalog, packages};
 
 use crate::{inject, rules, uninstall};
 use anyhow::Result;
