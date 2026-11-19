@@ -1,6 +1,7 @@
 mod item;
 mod matcher;
 mod scanner;
+mod source;
 
 pub(super) use item::{Identity, ScanItem};
 pub(super) use matcher::infer_domain_from_path;

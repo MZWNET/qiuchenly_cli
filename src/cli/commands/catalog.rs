@@ -2,7 +2,7 @@ use anyhow::{bail, Result};
 
 use crate::macos::apps::scan_installed_apps;
 use crate::store::{
-    catalog::{is_newer, resolve_bundle_id},
+    catalog::{is_newer, resolve_bundle_id, select_release},
     client::Client,
 };
 
@@ -149,7 +149,7 @@ pub async fn list(all: bool) -> Result<()> {
     Ok(())
 }
 
-pub async fn outdated(targets: Vec<String>) -> Result<()> {
+pub async fn outdated(targets: Vec<String>, beta: bool) -> Result<()> {
     let installed = scan_installed_apps()?;
     let client = Client::from_config()?;
     let selected = !targets.is_empty();
@@ -180,9 +180,16 @@ pub async fn outdated(targets: Vec<String>) -> Result<()> {
             })
     }) {
         let versions = client.app_versions(&app.bundle_id).await?;
-        let Some(latest) = versions.first() else {
+        let Some(latest) = select_release(&versions, None, beta) else {
             if selected {
-                bail!("{} 没有官方版本信息", app.bundle_id);
+                bail!(
+                    "{}",
+                    if versions.is_empty() {
+                        format!("{} 没有官方版本信息", app.bundle_id)
+                    } else {
+                        format!("{} 没有稳定版本，使用 --beta 可包含测试版", app.bundle_id)
+                    }
+                );
             }
             continue;
         };

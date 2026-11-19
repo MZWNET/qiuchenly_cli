@@ -11,6 +11,7 @@ pub(in crate::uninstall) struct ScanItem {
     pub reason: Option<String>,
     pub shared_with: Vec<String>,
     pub identity: Identity,
+    pub from_source: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -41,6 +42,7 @@ impl ScanItem {
             reason: None,
             shared_with: Vec::new(),
             identity: Identity::from_metadata(&metadata),
+            from_source: false,
         })
     }
 }

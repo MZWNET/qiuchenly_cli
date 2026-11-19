@@ -43,6 +43,14 @@ qiuchenly info <APP> --versions
 qiuchenly download <APP> --url
 qiuchenly install <APP> --appdir ~/Applications
 
+# Automatic version selection picks the latest stable release; --beta lets it pick betas,
+# an explicit --version is never filtered (outdated and community download support --beta too)
+qiuchenly download <APP> --version <VERSION>
+qiuchenly install <APP> --beta
+
+# Download or install the pre-cracked package instead of the official one (requires login)
+qiuchenly install <APP> --precracked
+
 # List installed apps and check for available updates
 qiuchenly list --all
 qiuchenly outdated

@@ -15,7 +15,7 @@ impl Cli {
             Command::Categories { key, query, page } => catalog::categories(key, query, page).await,
             Command::Info { app, versions } => catalog::info(&app, versions).await,
             Command::List { all } => catalog::list(all).await,
-            Command::Outdated { apps } => catalog::outdated(apps).await,
+            Command::Outdated { apps, beta } => catalog::outdated(apps, beta).await,
             Command::Popular => catalog::popular().await,
             Command::StoreVersion { current_version } => {
                 catalog::store_version(&current_version).await
@@ -23,17 +23,30 @@ impl Cli {
             Command::Download {
                 app,
                 version,
+                beta,
+                precracked,
                 url,
                 output,
-            } => packages::download(&app, version.as_deref(), url, output).await,
+            } => packages::download(&app, version.as_deref(), beta, precracked, url, output).await,
             Command::Install {
                 app,
                 version,
+                beta,
+                precracked,
                 appdir,
                 keep_download,
                 transfer,
             } => {
-                packages::install(&app, version.as_deref(), &appdir, keep_download, transfer).await
+                packages::install(
+                    &app,
+                    version.as_deref(),
+                    beta,
+                    precracked,
+                    &appdir,
+                    keep_download,
+                    transfer,
+                )
+                .await
             }
             Command::Uninstall { target, selection } => {
                 uninstall::uninstall_app(&target, selection.yes, selection.dry_run)
@@ -59,6 +72,7 @@ impl Cli {
                 CommunityAction::Download {
                     app,
                     release,
+                    beta,
                     arch,
                     attachment,
                     output,
@@ -66,6 +80,7 @@ impl Cli {
                     packages::community_download(
                         &app,
                         release.as_deref(),
+                        beta,
                         arch.as_deref(),
                         attachment,
                         output,

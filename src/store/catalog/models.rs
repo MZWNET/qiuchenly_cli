@@ -25,7 +25,7 @@ pub struct CatalogList {
     pub total: u64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct AppVersion {
     pub version: String,
     #[serde(rename = "fullVersion", default)]

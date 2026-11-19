@@ -5,7 +5,7 @@ use crate::packages::{self, aria2::Downloader};
 use crate::store::{
     catalog::{resolve_bundle_id, resolve_version},
     client::Client,
-    community,
+    community, precracked,
 };
 
 use super::super::args::{OutputArgs, TransferArgs};
@@ -13,12 +13,33 @@ use super::super::args::{OutputArgs, TransferArgs};
 pub async fn download(
     app: &str,
     version: Option<&str>,
+    beta: bool,
+    precracked: bool,
     url: bool,
     output: OutputArgs,
 ) -> Result<()> {
+    if precracked {
+        let client = Client::authenticated()?;
+        let download = precracked::resolve_download(&client, app, version, beta).await?;
+        if url {
+            println!("{}", download.download_url);
+            return Ok(());
+        }
+        let downloader = Downloader::new(output.transfer.aria2c);
+        let path = packages::download_file(
+            &downloader,
+            &download.download_url,
+            output.output_dir.as_deref(),
+            download.file_name.as_deref(),
+        )
+        .await?;
+        println!("下载完成: {}", path.display());
+        return Ok(());
+    }
+
     let client = Client::from_config()?;
     if url {
-        let (_, version) = resolve_version(&client, app, version).await?;
+        let (_, version) = resolve_version(&client, app, version, beta).await?;
         println!("{}", version.url);
     } else {
         let downloader = Downloader::new(output.transfer.aria2c);
@@ -27,6 +48,7 @@ pub async fn download(
             &downloader,
             app,
             version,
+            beta,
             output.output_dir.as_deref(),
         )
         .await?;
@@ -39,13 +61,24 @@ pub async fn download(
 pub async fn install(
     app: &str,
     version: Option<&str>,
+    beta: bool,
+    precracked: bool,
     appdir: &Path,
     keep: bool,
     transfer: TransferArgs,
 ) -> Result<()> {
-    let client = Client::from_config()?;
+    let client = if precracked {
+        Client::authenticated()?
+    } else {
+        Client::from_config()?
+    };
     let downloader = Downloader::new(transfer.aria2c);
-    let path = packages::install_app(&client, &downloader, app, version, appdir, keep).await?;
+    let path = if precracked {
+        packages::install_precracked_app(&client, &downloader, app, version, beta, appdir, keep)
+            .await?
+    } else {
+        packages::install_app(&client, &downloader, app, version, beta, appdir, keep).await?
+    };
     println!("安装完成: {}", path.display());
 
     Ok(())
@@ -87,13 +120,15 @@ pub async fn community_list(app: &str) -> Result<()> {
 pub async fn community_download(
     app: &str,
     release: Option<&str>,
+    beta: bool,
     arch: Option<&str>,
     attachment: bool,
     output: OutputArgs,
 ) -> Result<()> {
     let client = Client::authenticated()?;
     let bundle_id = resolve_bundle_id(&client, app).await?;
-    let file = community::resolve_download(&client, &bundle_id, release, arch, attachment).await?;
+    let file =
+        community::resolve_download(&client, &bundle_id, release, arch, attachment, beta).await?;
     let downloader = Downloader::new(output.transfer.aria2c);
     let path = packages::download_file(
         &downloader,

@@ -11,10 +11,7 @@ impl Client {
         })
     }
 
-    pub async fn compose_uninstall_rules(
-        &self,
-        collection_ids: &[String],
-    ) -> Result<serde_json::Value> {
+    pub async fn compose_uninstall_rules(&self, collection_ids: &[String]) -> Result<String> {
         let composed: serde_json::Value = self
             .post(
                 "/uninstall-rules/compose",
@@ -24,7 +21,8 @@ impl Client {
 
         composed
             .get("document")
-            .cloned()
+            .and_then(|v| v.as_str())
+            .map(String::from)
             .context("合成结果缺少 document")
     }
 }

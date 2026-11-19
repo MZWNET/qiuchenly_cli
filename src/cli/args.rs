@@ -74,6 +74,8 @@ pub enum Command {
     Outdated {
         #[arg(value_name = "APP")]
         apps: Vec<String>,
+        #[arg(long, help = "自动选择版本时包含测试版")]
+        beta: bool,
     },
     /// 查看热门下载
     Popular,
@@ -84,6 +86,10 @@ pub enum Command {
         app: String,
         #[arg(long)]
         version: Option<String>,
+        #[arg(long, help = "自动选择版本时包含测试版")]
+        beta: bool,
+        #[arg(long, help = "下载预破解包，默认下载官方包")]
+        precracked: bool,
         #[arg(
             long,
             conflicts_with = "output_dir",
@@ -98,6 +104,10 @@ pub enum Command {
         app: String,
         #[arg(long)]
         version: Option<String>,
+        #[arg(long, help = "自动选择版本时包含测试版")]
+        beta: bool,
+        #[arg(long, help = "下载并安装预破解包，默认使用官方包")]
+        precracked: bool,
         #[arg(long, default_value = "/Applications", help = "指定应用安装目录")]
         appdir: PathBuf,
         #[arg(long, help = "安装后保留下载的文件")]
@@ -164,6 +174,8 @@ pub enum CommunityAction {
         app: String,
         #[arg(long)]
         release: Option<String>,
+        #[arg(long, help = "自动选择发布时包含测试版")]
+        beta: bool,
         #[arg(long)]
         arch: Option<String>,
         #[arg(long)]

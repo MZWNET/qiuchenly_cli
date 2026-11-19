@@ -2,7 +2,7 @@ pub mod aria2;
 
 use crate::config;
 use crate::macos::archive;
-use crate::store::{catalog, client::Client};
+use crate::store::{catalog, client::Client, precracked};
 use anyhow::{Context, Result};
 use aria2::Downloader;
 use std::fs;
@@ -27,10 +27,29 @@ pub async fn download_app(
     downloader: &Downloader,
     app: &str,
     version: Option<&str>,
+    beta: bool,
     output_dir: Option<&Path>,
 ) -> Result<PathBuf> {
-    let (_, version) = catalog::resolve_version(client, app, version).await?;
+    let (_, version) = catalog::resolve_version(client, app, version, beta).await?;
     download_file(downloader, &version.url, output_dir, None).await
+}
+
+pub async fn download_precracked_app(
+    client: &Client,
+    downloader: &Downloader,
+    app: &str,
+    version: Option<&str>,
+    beta: bool,
+    output_dir: Option<&Path>,
+) -> Result<PathBuf> {
+    let download = precracked::resolve_download(client, app, version, beta).await?;
+    download_file(
+        downloader,
+        &download.download_url,
+        output_dir,
+        download.file_name.as_deref(),
+    )
+    .await
 }
 
 pub async fn install_app(
@@ -38,13 +57,31 @@ pub async fn install_app(
     downloader: &Downloader,
     app: &str,
     version: Option<&str>,
+    beta: bool,
     destination: &Path,
     keep: bool,
 ) -> Result<PathBuf> {
-    let downloaded = download_app(client, downloader, app, version, None).await?;
-    let installed = archive::install(&downloaded, destination)?;
+    let downloaded = download_app(client, downloader, app, version, beta, None).await?;
+    install_downloaded(&downloaded, destination, keep)
+}
+
+pub async fn install_precracked_app(
+    client: &Client,
+    downloader: &Downloader,
+    app: &str,
+    version: Option<&str>,
+    beta: bool,
+    destination: &Path,
+    keep: bool,
+) -> Result<PathBuf> {
+    let downloaded = download_precracked_app(client, downloader, app, version, beta, None).await?;
+    install_downloaded(&downloaded, destination, keep)
+}
+
+fn install_downloaded(downloaded: &Path, destination: &Path, keep: bool) -> Result<PathBuf> {
+    let installed = archive::install(downloaded, destination)?;
     if !keep {
-        fs::remove_file(&downloaded)
+        fs::remove_file(downloaded)
             .with_context(|| format!("安装成功，但删除下载文件 {} 失败", downloaded.display()))?;
     }
 

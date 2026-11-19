@@ -106,25 +106,55 @@ pub async fn resolve_bundle_id(client: &Client, app: &str) -> Result<String> {
     select_bundle_id(app, candidates, false)?.with_context(|| format!("找不到应用：{app}"))
 }
 
-fn select_version(versions: Vec<AppVersion>, requested: Option<&str>) -> Option<AppVersion> {
-    versions.into_iter().find(|version| {
-        requested.is_none_or(|requested| {
-            version.version == requested || version.full_version == requested
-        })
-    })
+pub trait Release {
+    fn version(&self) -> &str;
+    fn full_version(&self) -> &str;
+    fn beta(&self) -> bool;
+}
+
+pub fn select_release<'a, T: Release>(
+    releases: &'a [T],
+    requested: Option<&str>,
+    allow_beta: bool,
+) -> Option<&'a T> {
+    match requested {
+        Some(requested) => releases
+            .iter()
+            .find(|release| release.version() == requested || release.full_version() == requested),
+        None if allow_beta => releases.first(),
+        None => releases.iter().find(|release| !release.beta()),
+    }
+}
+
+impl Release for AppVersion {
+    fn version(&self) -> &str {
+        &self.version
+    }
+
+    fn full_version(&self) -> &str {
+        &self.full_version
+    }
+
+    fn beta(&self) -> bool {
+        self.beta
+    }
 }
 
 pub async fn resolve_version(
     client: &Client,
     app: &str,
     version: Option<&str>,
+    beta: bool,
 ) -> Result<(String, AppVersion)> {
     let bundle_id = resolve_bundle_id(client, app).await?;
     let versions = client.app_versions(&bundle_id).await?;
-    let selected = select_version(versions, version).with_context(|| match version {
-        Some(version) => format!("{bundle_id} 没有版本 {version}"),
-        None => format!("{bundle_id} 没有可用版本"),
-    })?;
+    let selected = select_release(&versions, version, beta)
+        .cloned()
+        .with_context(|| match version {
+            Some(version) => format!("{bundle_id} 没有版本 {version}"),
+            None if versions.is_empty() => format!("{bundle_id} 没有可用版本"),
+            None => format!("{bundle_id} 没有稳定版本，使用 --beta 可选择测试版"),
+        })?;
 
     Ok((bundle_id, selected))
 }
@@ -167,29 +197,45 @@ mod tests {
     }
 
     #[test]
-    fn version_selection_preserves_order_and_requires_requested_version() {
+    fn version_selection_skips_beta_unless_allowed_or_explicit() {
         let versions = || {
             vec![
                 AppVersion {
-                    version: "1.0".into(),
-                    full_version: "1.0.1".into(),
-                    url: "first".into(),
-                    beta: false,
-                },
-                AppVersion {
                     version: "2.0".into(),
                     full_version: "2.0.1".into(),
-                    url: "second".into(),
+                    url: "first".into(),
+                    beta: true,
+                },
+                AppVersion {
+                    version: "1.0".into(),
+                    full_version: "1.0.1".into(),
+                    url: "stable".into(),
                     beta: false,
                 },
             ]
         };
-        assert_eq!(select_version(versions(), None).unwrap().url, "first");
         assert_eq!(
-            select_version(versions(), Some("2.0.1")).unwrap().url,
-            "second"
+            select_release(&versions(), None, false).unwrap().url,
+            "stable"
         );
-        assert!(select_version(versions(), Some("3.0")).is_none());
+        assert_eq!(
+            select_release(&versions(), None, true).unwrap().url,
+            "first"
+        );
+        assert_eq!(
+            select_release(&versions(), Some("2.0.1"), false)
+                .unwrap()
+                .url,
+            "first"
+        );
+        assert!(select_release(&versions(), Some("3.0"), true).is_none());
+        let beta_only = vec![AppVersion {
+            version: "2.0".into(),
+            full_version: "2.0.1".into(),
+            url: "first".into(),
+            beta: true,
+        }];
+        assert!(select_release(&beta_only, None, false).is_none());
     }
 
     #[test]
