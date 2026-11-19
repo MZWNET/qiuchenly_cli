@@ -6,7 +6,7 @@ use crate::config;
 use anyhow::{Context, Result};
 use base64::Engine;
 use rsa::pkcs8::DecodePublicKey;
-use rsa::{Oaep, RsaPublicKey};
+use rsa::{Oaep, PublicKey as RsaPublicKey};
 
 use super::client::Client;
 
@@ -35,8 +35,8 @@ pub async fn login(username: &str, password: &str) -> Result<()> {
         RsaPublicKey::from_public_key_pem(&public_key.public_key).context("解析登录公钥失败")?;
     let encrypted = key
         .encrypt(
-            &mut rand::thread_rng(),
-            Oaep::new::<sha2::Sha256>(),
+            &mut rand::rng(),
+            Oaep::<sha2::Sha256>::new(),
             password.as_bytes(),
         )
         .context("密码加密失败")?;

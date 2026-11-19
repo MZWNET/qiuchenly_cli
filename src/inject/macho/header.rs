@@ -127,7 +127,7 @@ impl HeaderPadding {
             CommandVariant::BuildVersion(version) => {
                 let tools_size = command_bytes.len() - 24;
                 ensure!(
-                    tools_size % 8 == 0 && tools_size / 8 == version.ntools as usize,
+                    tools_size.is_multiple_of(8) && tools_size / 8 == version.ntools as usize,
                     "LC_BUILD_VERSION 工具表长度无效"
                 );
             }

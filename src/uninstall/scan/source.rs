@@ -328,9 +328,12 @@ mod tests {
         );
         let mut scanner = scanner_with(&rules);
         scanner.scan_app(&AppContext::bundle_id("com.example.Tool"));
-        assert_eq!(scanner.items.len(), 2);
-        assert!(scanner.items[0].path.ends_with("Library/Caches/Tool"));
-        assert!(scanner.items[1].path.ends_with("Library/Preferences/Tool"));
+        let paths: HashSet<PathBuf> = scanner.items.iter().map(|item| item.path.clone()).collect();
+        let expected = HashSet::from([
+            temp.path().join("Library/Caches/Tool"),
+            temp.path().join("Library/Preferences/Tool"),
+        ]);
+        assert_eq!(paths, expected);
     }
 
     #[test]

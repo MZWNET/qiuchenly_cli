@@ -6,6 +6,8 @@ rustPlatform.buildRustPackage {
   pname = "qiuchenly-cli";
   inherit ((lib.importTOML ./Cargo.toml).package) version;
 
+  preBuild = "unset AWS_LC_SYS_USE_SYSTEM";
+
   src = lib.fileset.toSource {
     root = ./.;
     fileset = lib.fileset.unions [
