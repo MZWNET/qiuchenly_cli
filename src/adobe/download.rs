@@ -122,7 +122,7 @@ fn verify_package(path: &Path, package: &Package) -> Result<()> {
     {
         let mut hasher = Sha256::new();
         let mut file = File::open(path).with_context(|| format!("打开 {} 失败", path.display()))?;
-        let mut buffer = [0u8; 1024 * 1024];
+        let mut buffer = vec![0u8; 1024 * 1024];
         loop {
             let read = file
                 .read(&mut buffer)
