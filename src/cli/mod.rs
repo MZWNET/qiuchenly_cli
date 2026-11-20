@@ -28,26 +28,7 @@ impl Cli {
                 url,
                 output,
             } => packages::download(&app, version.as_deref(), beta, precracked, url, output).await,
-            Command::Install {
-                app,
-                version,
-                beta,
-                precracked,
-                appdir,
-                keep_download,
-                transfer,
-            } => {
-                packages::install(
-                    &app,
-                    version.as_deref(),
-                    beta,
-                    precracked,
-                    &appdir,
-                    keep_download,
-                    transfer,
-                )
-                .await
-            }
+            Command::Install(args) => packages::install(&args).await,
             Command::Uninstall { target, selection } => {
                 uninstall::uninstall_app(&target, selection.yes, selection.dry_run)
             }

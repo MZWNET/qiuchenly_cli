@@ -3,12 +3,12 @@ use std::path::Path;
 use std::process::Command;
 use tempfile::TempDir;
 
-pub(super) struct MountedImage {
-    pub(super) mountpoint: Option<TempDir>,
+pub(crate) struct MountedImage {
+    mountpoint: Option<TempDir>,
 }
 
 impl MountedImage {
-    pub(super) fn attach(archive: &Path) -> Result<Self> {
+    pub(crate) fn attach(archive: &Path) -> Result<Self> {
         let mountpoint = tempfile::tempdir().context("创建磁盘映像挂载点")?;
         let output = Command::new("hdiutil")
             .args(["attach", "-readonly", "-nobrowse", "-mountpoint"])
@@ -29,7 +29,7 @@ impl MountedImage {
         })
     }
 
-    pub(super) fn detach(&mut self) -> Result<()> {
+    pub(crate) fn detach(&mut self) -> Result<()> {
         let mountpoint = self.mountpoint.as_ref().expect("磁盘映像必须已挂载");
         let output = Command::new("hdiutil")
             .arg("detach")
@@ -46,6 +46,10 @@ impl MountedImage {
         drop(self.mountpoint.take());
 
         Ok(())
+    }
+
+    pub(crate) fn path(&self) -> &Path {
+        self.mountpoint.as_ref().expect("磁盘映像必须已挂载").path()
     }
 }
 

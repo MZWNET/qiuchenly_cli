@@ -1,3 +1,4 @@
+mod adobe;
 mod cli;
 mod config;
 mod inject;

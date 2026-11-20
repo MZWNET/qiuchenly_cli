@@ -43,6 +43,29 @@ pub struct SelectionArgs {
     pub dry_run: bool,
 }
 
+#[derive(Args)]
+pub struct InstallArgs {
+    pub app: String,
+    #[arg(long)]
+    pub version: Option<String>,
+    #[arg(long, help = "自动选择版本时包含测试版")]
+    pub beta: bool,
+    #[arg(long, help = "下载并安装预破解包，默认使用官方包")]
+    pub precracked: bool,
+    #[arg(long, default_value = "/Applications", help = "指定应用安装目录")]
+    pub appdir: PathBuf,
+    #[arg(long, help = "安装后保留下载的文件")]
+    pub keep_download: bool,
+    #[arg(
+        long,
+        value_name = "LANGUAGE",
+        help = "Adobe 安装语言（例如 en_US、zh_CN），默认 en_US"
+    )]
+    pub language: Option<String>,
+    #[command(flatten)]
+    pub transfer: TransferArgs,
+}
+
 #[derive(Subcommand)]
 pub enum Command {
     /// 搜索商店应用
@@ -100,21 +123,7 @@ pub enum Command {
         output: OutputArgs,
     },
     /// 下载并安装应用
-    Install {
-        app: String,
-        #[arg(long)]
-        version: Option<String>,
-        #[arg(long, help = "自动选择版本时包含测试版")]
-        beta: bool,
-        #[arg(long, help = "下载并安装预破解包，默认使用官方包")]
-        precracked: bool,
-        #[arg(long, default_value = "/Applications", help = "指定应用安装目录")]
-        appdir: PathBuf,
-        #[arg(long, help = "安装后保留下载的文件")]
-        keep_download: bool,
-        #[command(flatten)]
-        transfer: TransferArgs,
-    },
+    Install(InstallArgs),
     /// 卸载应用并清理残留
     Uninstall {
         target: String,

@@ -1,14 +1,9 @@
 use anyhow::Result;
-use std::path::Path;
 
-use crate::packages::{self, aria2::Downloader};
-use crate::store::{
-    catalog::{resolve_bundle_id, resolve_version},
-    client::Client,
-    community, precracked,
-};
+use crate::packages::{self, aria2::Downloader, InstallOptions};
+use crate::store::{catalog::resolve_bundle_id, client::Client, community};
 
-use super::super::args::{OutputArgs, TransferArgs};
+use super::super::args::{InstallArgs, OutputArgs};
 
 pub async fn download(
     app: &str,
@@ -18,67 +13,47 @@ pub async fn download(
     url: bool,
     output: OutputArgs,
 ) -> Result<()> {
-    if precracked {
-        let client = Client::authenticated()?;
-        let download = precracked::resolve_download(&client, app, version, beta).await?;
-        if url {
-            println!("{}", download.download_url);
-            return Ok(());
-        }
-        let downloader = Downloader::new(output.transfer.aria2c);
-        let path = packages::download_file(
-            &downloader,
-            &download.download_url,
-            output.output_dir.as_deref(),
-            download.file_name.as_deref(),
-        )
-        .await?;
-        println!("下载完成: {}", path.display());
-        return Ok(());
-    }
-
-    let client = Client::from_config()?;
+    let client = if precracked {
+        Client::authenticated()?
+    } else {
+        Client::from_config()?
+    };
+    let resolved = packages::resolve_download(&client, app, version, beta, precracked).await?;
     if url {
-        let (_, version) = resolve_version(&client, app, version, beta).await?;
-        println!("{}", version.url);
+        println!("{}", resolved.url);
     } else {
         let downloader = Downloader::new(output.transfer.aria2c);
-        let path = packages::download_app(
-            &client,
-            &downloader,
-            app,
-            version,
-            beta,
-            output.output_dir.as_deref(),
-        )
-        .await?;
+        let path = packages::download(&downloader, &resolved, output.output_dir.as_deref()).await?;
         println!("下载完成: {}", path.display());
     }
 
     Ok(())
 }
 
-pub async fn install(
-    app: &str,
-    version: Option<&str>,
-    beta: bool,
-    precracked: bool,
-    appdir: &Path,
-    keep: bool,
-    transfer: TransferArgs,
-) -> Result<()> {
-    let client = if precracked {
+pub async fn install(args: &InstallArgs) -> Result<()> {
+    if args.precracked && args.language.is_some() {
+        anyhow::bail!("--language 仅适用于 Adobe 安装");
+    }
+    let client = if args.precracked {
         Client::authenticated()?
     } else {
         Client::from_config()?
     };
-    let downloader = Downloader::new(transfer.aria2c);
-    let path = if precracked {
-        packages::install_precracked_app(&client, &downloader, app, version, beta, appdir, keep)
-            .await?
-    } else {
-        packages::install_app(&client, &downloader, app, version, beta, appdir, keep).await?
-    };
+    let downloader = Downloader::new(args.transfer.aria2c.clone());
+    let path = packages::install(
+        &client,
+        &downloader,
+        &args.app,
+        args.version.as_deref(),
+        args.beta,
+        args.precracked,
+        &InstallOptions {
+            destination: &args.appdir,
+            language: args.language.as_deref(),
+            keep: args.keep_download,
+        },
+    )
+    .await?;
     println!("安装完成: {}", path.display());
 
     Ok(())

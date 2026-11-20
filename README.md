@@ -43,6 +43,10 @@ qiuchenly info <APP> --versions
 qiuchenly download <APP> --url
 qiuchenly install <APP> --appdir ~/Applications
 
+# Install Adobe Photoshop, optionally with the Chinese language pack
+qiuchenly install PHSP
+qiuchenly install PHSP --language zh_CN
+
 # Automatic version selection picks the latest stable release; --beta lets it pick betas,
 # an explicit --version is never filtered (outdated and community download support --beta too)
 qiuchenly download <APP> --version <VERSION>

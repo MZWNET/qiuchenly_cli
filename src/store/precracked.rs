@@ -177,7 +177,7 @@ pub async fn resolve_download(
     app: &str,
     version: Option<&str>,
     beta: bool,
-) -> Result<PreCrackedDownload> {
+) -> Result<(String, PreCrackedDownload)> {
     let bundle_id = resolve_bundle_id(client, app).await?;
     let binds = client.precracked_binds(&bundle_id).await?;
     let bind = if version.is_none() && !beta {
@@ -207,10 +207,13 @@ pub async fn resolve_download(
         anyhow::bail!("预破解下载响应与所选安装包不一致");
     }
 
-    Ok(PreCrackedDownload {
-        file_name: decode_file_name(download.file_name.as_deref().or(package.name.as_deref())),
-        ..download
-    })
+    Ok((
+        bundle_id,
+        PreCrackedDownload {
+            file_name: decode_file_name(download.file_name.as_deref().or(package.name.as_deref())),
+            ..download
+        },
+    ))
 }
 
 #[cfg(test)]
