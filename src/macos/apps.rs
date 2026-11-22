@@ -1,5 +1,4 @@
 use anyhow::{bail, Context, Result};
-use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use walkdir::{DirEntry, WalkDir};
@@ -11,34 +10,31 @@ pub struct InstalledApp {
     pub path: PathBuf,
 }
 
-#[derive(Deserialize)]
-struct BundleInfo {
-    #[serde(rename = "CFBundleIdentifier")]
-    bundle_id: String,
-    #[serde(rename = "CFBundleName")]
-    name: Option<String>,
-    #[serde(rename = "CFBundleDisplayName")]
-    display_name: Option<String>,
-    #[serde(rename = "CFBundleShortVersionString")]
-    version: Option<String>,
-}
-
 pub fn parse_app_bundle(path: &Path) -> Result<InstalledApp> {
     let plist_path = path.join("Contents/Info.plist");
-    let info: BundleInfo =
-        plist::from_file(&plist_path).with_context(|| format!("读取 {}", plist_path.display()))?;
-    if info.bundle_id.trim().is_empty() {
+    // 破解版 plist 常含重复键, serde 结构体会报错, Value 取后值
+    let info = plist::Value::from_file(&plist_path)
+        .with_context(|| format!("读取 {}", plist_path.display()))?;
+    let dict = info
+        .as_dictionary()
+        .with_context(|| format!("{} 不是字典结构", plist_path.display()))?;
+    let field = |key: &str| {
+        dict.get(key)
+            .and_then(plist::Value::as_string)
+            .map(|s| s.trim().to_owned())
+    };
+    let bundle_id = field("CFBundleIdentifier").unwrap_or_default();
+    if bundle_id.is_empty() {
         bail!("{} 缺少应用标识", plist_path.display());
     }
 
     Ok(InstalledApp {
-        bundle_id: info.bundle_id,
-        name: info
-            .name
-            .or(info.display_name)
+        bundle_id,
+        name: field("CFBundleName")
+            .or_else(|| field("CFBundleDisplayName"))
             .or_else(|| path.file_stem().map(|s| s.to_string_lossy().into_owned()))
             .unwrap_or_default(),
-        version: info.version.unwrap_or_default(),
+        version: field("CFBundleShortVersionString").unwrap_or_default(),
         path: path.to_path_buf(),
     })
 }
@@ -142,5 +138,32 @@ mod tests {
         info.insert("CFBundleIdentifier".into(), Value::String(String::new()));
         plist::to_file_binary(&path, &info).unwrap();
         assert!(parse_app_bundle(&app).is_err());
+    }
+
+    #[test]
+    fn tolerates_duplicate_plist_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join("Example.app");
+        let contents = app.join("Contents");
+        fs::create_dir_all(&contents).unwrap();
+        fs::write(
+            contents.join("Info.plist"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.parallels.desktop.console</string>
+    <key>CFBundleShortVersionString</key>
+    <string>26.4.1</string>
+    <key>CFBundleShortVersionString</key>
+    <string>26.4.1</string>
+</dict>
+</plist>"#,
+        )
+        .unwrap();
+        let parsed = parse_app_bundle(&app).unwrap();
+        assert_eq!(parsed.bundle_id, "com.parallels.desktop.console");
+        assert_eq!(parsed.version, "26.4.1");
     }
 }
