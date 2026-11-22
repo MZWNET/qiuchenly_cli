@@ -4,12 +4,11 @@ use super::model::{
     architecture, Application, Dependency, DownloadedPackage, DownloadedProduct, Package, Product,
 };
 use anyhow::{bail, Context, Result};
-use sha2::{Digest, Sha256};
-use std::fs::{self, File};
-use std::io::Read;
+use std::fs;
 use std::path::Path;
 
 use crate::packages::aria2::Downloader;
+use crate::packages::checksum::verify_sha256;
 
 pub(super) async fn download_product(
     client: &CatalogClient,
@@ -120,29 +119,7 @@ fn verify_package(path: &Path, package: &Package) -> Result<()> {
         .as_deref()
         .filter(|hash| hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit()))
     {
-        let mut hasher = Sha256::new();
-        let mut file = File::open(path).with_context(|| format!("打开 {} 失败", path.display()))?;
-        let mut buffer = vec![0u8; 1024 * 1024];
-        loop {
-            let read = file
-                .read(&mut buffer)
-                .with_context(|| format!("读取 {} 失败", path.display()))?;
-            if read == 0 {
-                break;
-            }
-            hasher.update(&buffer[..read]);
-        }
-        let actual: String = hasher
-            .finalize()
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect();
-        if !actual.eq_ignore_ascii_case(expected) {
-            bail!(
-                "{} SHA256 校验失败: 期望 {expected}，实际 {actual}",
-                package.full_name
-            );
-        }
+        verify_sha256(path, expected, &package.full_name)?;
     }
     Ok(())
 }
@@ -227,40 +204,9 @@ fn escape_xml(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::super::model::fixtures::{application, package};
     use super::*;
-    use std::collections::BTreeSet;
-
-    fn application(sap_code: &str, name: &str) -> Application {
-        Application {
-            sap_code: sap_code.to_owned(),
-            name: name.to_owned(),
-            family_name: None,
-            product_version: "1.0.0.1".to_owned(),
-            base_version: "1.0".to_owned(),
-            platform: "macuniversal".to_owned(),
-            install_dir: "[AdobeProgramFiles]/Test".to_owned(),
-            app_launch: String::new(),
-            supported_languages: Vec::new(),
-            cdn: "https://cdn.example.com".to_owned(),
-            packages: Vec::new(),
-            deferred_packages: BTreeSet::new(),
-            is_dmg: false,
-        }
-    }
-
-    fn package(name: &str, sequence: u64, condition: Option<&str>) -> Package {
-        Package {
-            name: name.to_owned(),
-            version: "1.0".to_owned(),
-            full_name: format!("{name}.zip"),
-            path: format!("/AdobeProducts/{name}.zip"),
-            condition: condition.map(str::to_owned),
-            download_size: None,
-            sha256: None,
-            install_sequence: sequence,
-            alias_name: None,
-        }
-    }
+    use sha2::{Digest, Sha256};
 
     #[test]
     fn package_url_joins_cdn_or_uses_absolute() {
@@ -304,17 +250,9 @@ mod tests {
     fn verifies_sha256_of_large_file_incrementally() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("big.zip");
-        let chunk = vec![7u8; 3 * 1024 * 1024];
-        let mut expected = Sha256::new();
-        let mut handle = File::create(&file).unwrap();
-        for _ in 0..2 {
-            use std::io::Write;
-            handle.write_all(&chunk).unwrap();
-            expected.update(&chunk);
-        }
-        drop(handle);
-        let digest: String = expected
-            .finalize()
+        let contents = vec![7u8; 1024 * 1024 + 1];
+        fs::write(&file, &contents).unwrap();
+        let digest: String = Sha256::digest(&contents)
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect();

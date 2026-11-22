@@ -27,11 +27,28 @@ fn locate(bundle_id: &str) -> Result<(AppConfig, InstalledApp)> {
     Ok((entry, app))
 }
 
+fn injection_target(config: &AppConfig, app: &InstalledApp) -> Option<PathBuf> {
+    let file = config.inject_file.as_deref()?;
+    Some(
+        app.path
+            .join(
+                config
+                    .bridge_file
+                    .as_deref()
+                    .unwrap_or(DEFAULT_BRIDGE)
+                    .trim_matches('/'),
+            )
+            .join(file),
+    )
+}
+
 pub fn list() -> Result<()> {
-    let config = config::load()?;
+    let Some(cached) = config::load_cached()? else {
+        bail!("没有本地注入列表，请先运行 qiuchenly inject --update");
+    };
     let installed = apps::scan_installed_apps()?;
     println!("{:<45} {:<10} 注入方式", "bundleId", "已装");
-    for entry in &config.app_list {
+    for entry in &cached.config.app_list {
         for pattern in entry.package_name.patterns() {
             if !pattern.contains('*') && !pattern.contains('-') {
                 let is_installed = installed.iter().any(|app| app.bundle_id == *pattern);
@@ -55,6 +72,66 @@ pub fn list() -> Result<()> {
     Ok(())
 }
 
+pub async fn update() -> Result<()> {
+    let cached = config::load_cached()?;
+    let current_version = cached
+        .as_ref()
+        .map_or("0", |cached| cached.store_version.as_str());
+    let client = crate::store::client::Client::from_channel(crate::config::DEFAULT_CHANNEL)?;
+    let update = client.check_gui_update(current_version).await?;
+    let package = update
+        .latest_package
+        .context("商店没有返回最新 GUI 安装包")?;
+    if cached
+        .as_ref()
+        .is_some_and(|c| c.store_version == package.version)
+    {
+        println!("注入列表已是最新（QiuChenAppStore {}）", package.version);
+
+        return Ok(());
+    }
+    let response = client
+        .download_gui_update(&package.version, &package)
+        .await?;
+    if response.version != package.version {
+        bail!(
+            "下载响应版本不匹配: 期望 {}，实际 {}",
+            package.version,
+            response.version
+        );
+    }
+    let temp = tempfile::tempdir().context("创建临时目录")?;
+    let downloader = crate::packages::aria2::Downloader::new(PathBuf::from("aria2c"));
+    let dmg = downloader
+        .download(
+            &response.download_url,
+            temp.path(),
+            response.file_name.as_deref(),
+        )
+        .await?;
+    crate::packages::checksum::verify_sha256(&dmg, &response.sha256, "下载文件")?;
+    let mut mounted = crate::macos::archive::image::MountedImage::attach(&dmg)?;
+    let config_path = mounted.path().join(
+        "QiuChenAppStore.app/Contents/Resources/HayakuDaemon.app/Contents/Resources/config.json",
+    );
+    let data = fs::read(&config_path).with_context(|| format!("读取 {}", config_path.display()))?;
+    let config: config::InjectConfig = serde_json::from_slice(&data)
+        .with_context(|| format!("解析 {} 失败", config_path.display()))?;
+    mounted.detach()?;
+    let count = config.app_list.len();
+    let cached = config::CachedInjectList {
+        store_version: package.version,
+        config,
+    };
+    config::save_cached(&cached)?;
+    println!(
+        "注入列表已更新（QiuChenAppStore {}，{count} 个应用）",
+        cached.store_version
+    );
+
+    Ok(())
+}
+
 pub fn inject_app(bundle_id: &str) -> Result<()> {
     let (config, app) = locate(bundle_id)?;
     if !config.allows_version(&app.version) {
@@ -68,16 +145,9 @@ pub fn inject_app(bundle_id: &str) -> Result<()> {
     }
     let dylib_source = config::find_dylib_source()?;
     let dylib_name = config.dylib_select.as_deref().unwrap_or("CoreInject.dylib");
-    let bridge = app.path.join(
-        config
-            .bridge_file
-            .as_deref()
-            .unwrap_or(DEFAULT_BRIDGE)
-            .trim_matches('/'),
-    );
     let copy_dylib = config.need_copy_to_app_dir.unwrap_or(false);
-    let targets = if let Some(file) = &config.inject_file {
-        vec![bridge.join(file)]
+    let targets = if let Some(target) = injection_target(&config, &app) {
+        vec![target]
     } else {
         let main = app.path.join("Contents/MacOS");
         let mut targets = Vec::new();
@@ -149,17 +219,7 @@ pub fn restore_app(bundle_id: &str) -> Result<()> {
         app.path.join("Contents/Frameworks"),
         app.path.join("Contents/MacOS"),
     ];
-    if let Some(file) = &config.inject_file {
-        let target = app
-            .path
-            .join(
-                config
-                    .bridge_file
-                    .as_deref()
-                    .unwrap_or(DEFAULT_BRIDGE)
-                    .trim_matches('/'),
-            )
-            .join(file);
+    if let Some(target) = injection_target(&config, &app) {
         let directory = target.parent().expect("注入目标位于应用目录内");
         if !directories.iter().any(|path| path == directory) {
             directories.push(directory.to_path_buf());

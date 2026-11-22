@@ -4,7 +4,7 @@ mod scan;
 mod selection;
 
 use crate::macos::apps;
-use crate::rules::source::{expand_home, AppContext, SourceRuleType};
+use crate::rules::source::AppContext;
 use crate::rules::{self, RuleDoc, RuleEntry};
 use anyhow::{bail, Context, Result};
 use scan::{infer_domain_from_path, ScanItem, Scanner};
@@ -37,7 +37,7 @@ pub fn uninstall_app(target: &str, yes: bool, dry_run: bool) -> Result<()> {
     check_source_uninstaller(&doc, &context)?;
     println!("扫描 {} ...", app_path.display());
     let mut scanner = Scanner::new(doc)?;
-    scanner.scan_app(&context);
+    scanner.scan_target(&context);
     scanner.items.retain(|item| {
         if item.from_source {
             return true;
@@ -55,7 +55,7 @@ pub fn uninstall_app(target: &str, yes: bool, dry_run: bool) -> Result<()> {
     });
     scanner.items.insert(0, ScanItem::app(app_path)?);
     scanner.post_process(false);
-    finish_scan(scanner.items, yes, dry_run, Some(&app.bundle_id))
+    finish_scan(scanner, yes, dry_run, Some(&app.bundle_id))
 }
 
 pub fn scan_orphans(yes: bool, dry_run: bool) -> Result<()> {
@@ -97,13 +97,14 @@ pub fn scan_orphans(yes: bool, dry_run: bool) -> Result<()> {
             .is_some_and(|domain| !installed.contains(&domain.to_lowercase()))
     });
     scanner.post_process(true);
-    finish_scan(scanner.items, yes, dry_run, None)
+    finish_scan(scanner, yes, dry_run, None)
 }
 
 pub fn leftovers(app: &str, yes: bool, dry_run: bool) -> Result<()> {
     println!("按规则扫描 {app} 的残留 ...");
     let mut scanner = Scanner::new(rules::load_rules()?)?;
-    scanner.scan_bundle(app);
+    let context = AppContext::bundle_id(app);
+    scanner.scan_target(&context);
     scanner.items.retain(|item| {
         item.from_source
             || infer_domain_from_path(&item.path)
@@ -114,10 +115,11 @@ pub fn leftovers(app: &str, yes: bool, dry_run: bool) -> Result<()> {
         return Ok(());
     }
     scanner.post_process(true);
-    finish_scan(scanner.items, yes, dry_run, Some(app))
+    finish_scan(scanner, yes, dry_run, Some(app))
 }
 
-fn finish_scan(items: Vec<ScanItem>, yes: bool, dry_run: bool, app: Option<&str>) -> Result<()> {
+fn finish_scan(scanner: Scanner, yes: bool, dry_run: bool, app: Option<&str>) -> Result<()> {
+    let items = scanner.items;
     let deletable: Vec<&ScanItem> = items.iter().filter(|item| item.deletable).collect();
     let total: u64 = deletable.iter().filter_map(|item| item.size_bytes).sum();
     println!(
@@ -158,13 +160,21 @@ fn finish_scan(items: Vec<ScanItem>, yes: bool, dry_run: bool, app: Option<&str>
         println!("未选择任何项，退出");
         return Ok(());
     }
-    let mut protected: Vec<PathBuf> = rules::load_rules()?
+    let mut protected: Vec<PathBuf> = scanner
+        .doc
         .protection
         .skip_paths
         .iter()
         .map(|path| rules::expand_path(path))
         .collect();
-    protected.extend(protect_paths_for_delete()?);
+    protected.extend(
+        scanner
+            .protection
+            .paths
+            .iter()
+            .filter(|path| !path.has_glob())
+            .map(|path| path.path.clone()),
+    );
     let mut deleted = 0;
     let mut failed = Vec::new();
     let mut freed = 0;
@@ -199,37 +209,6 @@ fn finish_scan(items: Vec<ScanItem>, yes: bool, dry_run: bool, app: Option<&str>
     }
 
     Ok(())
-}
-
-/// 删除前的第二道防线：protect 规则里不带通配的路径直接挡掉
-fn protect_paths_for_delete() -> Result<Vec<PathBuf>> {
-    let doc = rules::load_rules()?;
-    let mut out = Vec::new();
-    for entry in &doc.rules {
-        let RuleEntry::Source(rule) = entry else {
-            continue;
-        };
-        if rule.kind != SourceRuleType::Protect {
-            continue;
-        }
-        for item in rule.items.iter().filter(|item| item.enabled) {
-            let Some(path) = &item.path else {
-                continue;
-            };
-            if path.contains('*') || path.contains('?') {
-                continue;
-            }
-            let expanded = expand_placeholders_for_delete(path);
-            if let Some(path) = expanded {
-                out.push(path);
-            }
-        }
-    }
-    Ok(out)
-}
-
-fn expand_placeholders_for_delete(path: &str) -> Option<PathBuf> {
-    expand_home(path).ok()
 }
 
 fn check_official_uninstaller(doc: &RuleDoc, bundle_id: &str, name: &str) -> Result<()> {

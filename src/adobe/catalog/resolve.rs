@@ -1,112 +1,9 @@
-use super::application::parse_application;
-use super::model::{platform_preference, Application, Dependency, Product};
-use super::response::OneOrMany;
-use anyhow::{anyhow, bail, Context, Result};
-use serde::Deserialize;
+use super::super::model::{platform_preference, Dependency, Product};
+use super::model::CatalogResponse;
+#[cfg(test)]
+use anyhow::Context;
+use anyhow::{anyhow, bail, Result};
 use std::collections::HashMap;
-use tokio::process::Command;
-
-const CATALOG_URL: &str =
-    "https://prod-rel-ffc-ccm.oobesaas.adobe.com/adobe-ffc-external/core/v6/products/all";
-const APPLICATION_URL: &str = "https://cdn-ffc.oobesaas.adobe.com/core/v3/applications";
-const API_KEY: &str = "qiolito74e5uKpdpfjtJyu7bXXWEJdO2d";
-const APP_ID: &str = "accc-apps-panel-desktop";
-const USER_AGENT: &str = "Adobe Application Manager 2.0";
-const PLATFORMS: &str = "macarm64,macuniversal,osx10-64,osx10";
-
-pub(super) struct CatalogClient;
-
-#[derive(Deserialize)]
-struct CatalogResponse {
-    #[serde(default)]
-    channels: CatalogChannels,
-}
-
-#[derive(Default, Deserialize)]
-struct CatalogChannels {
-    #[serde(default)]
-    channel: OneOrMany<CatalogChannel>,
-}
-
-#[derive(Deserialize)]
-struct CatalogChannel {
-    #[serde(default)]
-    cdn: CatalogCdn,
-    #[serde(default)]
-    products: ChannelProducts,
-}
-
-#[derive(Default, Deserialize)]
-struct CatalogCdn {
-    #[serde(default)]
-    secure: String,
-}
-
-#[derive(Default, Deserialize)]
-struct ChannelProducts {
-    #[serde(default)]
-    product: OneOrMany<CatalogProduct>,
-}
-
-#[derive(Deserialize)]
-struct CatalogProduct {
-    id: String,
-    #[serde(default, rename = "displayName")]
-    display_name: String,
-    version: String,
-    #[serde(default)]
-    platforms: ProductPlatforms,
-}
-
-#[derive(Default, Deserialize)]
-struct ProductPlatforms {
-    #[serde(default)]
-    platform: OneOrMany<ProductPlatform>,
-}
-
-#[derive(Deserialize)]
-struct ProductPlatform {
-    id: String,
-    #[serde(default, rename = "languageSet")]
-    language_set: OneOrMany<PlatformLanguageSet>,
-}
-
-#[derive(Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PlatformLanguageSet {
-    #[serde(default)]
-    name: Option<String>,
-    #[serde(default)]
-    base_version: Option<String>,
-    #[serde(default)]
-    build_guid: Option<String>,
-    #[serde(default)]
-    urls: LanguageSetUrls,
-    #[serde(default)]
-    dependencies: LanguageSetDependencies,
-}
-
-#[derive(Default, Deserialize)]
-struct LanguageSetUrls {
-    #[serde(default, rename = "manifestURL")]
-    manifest_url: Option<String>,
-}
-
-#[derive(Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct LanguageSetDependencies {
-    #[serde(default)]
-    dependency: OneOrMany<LanguageSetDependency>,
-}
-
-#[derive(Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct LanguageSetDependency {
-    #[serde(default)]
-    sap_code: String,
-    #[serde(default)]
-    base_version: String,
-}
 
 fn flatten_entries(response: &CatalogResponse) -> Vec<Product> {
     let preference = platform_preference();
@@ -199,7 +96,7 @@ fn resolve_from_catalog(
     resolve_response(&response, app, version, beta)
 }
 
-fn resolve_response(
+pub(super) fn resolve_response(
     response: &CatalogResponse,
     app: &str,
     version: Option<&str>,
@@ -298,143 +195,8 @@ fn collect_dependencies<'a>(
         stack.pop();
         resolved.push(candidate.clone());
     }
+
     Ok(())
-}
-
-impl CatalogClient {
-    pub(super) fn new() -> Result<Self> {
-        Ok(Self)
-    }
-
-    pub(super) fn download_headers(&self) -> Vec<(String, String)> {
-        vec![
-            ("X-Adobe-App-Id".to_owned(), APP_ID.to_owned()),
-            ("X-Api-Key".to_owned(), API_KEY.to_owned()),
-            ("User-Agent".to_owned(), "Creative Cloud".to_owned()),
-        ]
-    }
-
-    async fn get_body(
-        &self,
-        url: &str,
-        query: Option<&[(&str, &str)]>,
-        build_guid: Option<&str>,
-    ) -> Result<String> {
-        let mut parsed =
-            reqwest::Url::parse(url).with_context(|| format!("无效的 Adobe 请求地址: {url}"))?;
-        if let Some(query) = query {
-            let mut pairs = parsed.query_pairs_mut();
-            for (key, value) in query {
-                pairs.append_pair(key, value);
-            }
-        }
-        let mut command = Command::new("curl");
-        command
-            .args([
-                "--silent",
-                "--show-error",
-                "--fail",
-                "--compressed",
-                "--location",
-                "--max-time",
-                "300",
-            ])
-            .arg("--header")
-            .arg(format!("X-Adobe-App-Id: {APP_ID}"))
-            .arg("--header")
-            .arg(format!("X-Api-Key: {API_KEY}"))
-            .arg("--header")
-            .arg(format!("User-Agent: {USER_AGENT}"));
-        if let Some(build_guid) = build_guid {
-            command
-                .arg("--header")
-                .arg(format!("x-adobe-build-guid: {build_guid}"));
-        }
-        let output = command
-            .arg("--")
-            .arg(parsed.as_str())
-            .output()
-            .await
-            .context("运行 curl 失败")?;
-        if !output.status.success() {
-            let error = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-            bail!("Adobe HTTP 请求失败: {url} {error}");
-        }
-        let body = String::from_utf8(output.stdout)
-            .with_context(|| format!("Adobe 响应不是有效的 UTF-8: {url}"))?;
-        if body.trim().is_empty() {
-            bail!("Adobe 响应为空: {url}");
-        }
-        Ok(body)
-    }
-
-    pub(super) async fn resolve_products(
-        &self,
-        app: &str,
-        version: Option<&str>,
-        beta: bool,
-    ) -> Result<Option<Vec<Product>>> {
-        let query: &[(&str, &str)] = &[
-            ("channel", "ccm"),
-            ("channel", "sti"),
-            ("platform", PLATFORMS),
-            ("_type", "json"),
-            ("productType", "Desktop"),
-            ("payload", "true"),
-            ("filterTranslatedApps", "true"),
-            ("hidpi", "true"),
-        ];
-        let sti_query: &[(&str, &str)] = &[
-            ("channel", "sti"),
-            ("platform", PLATFORMS),
-            ("_type", "json"),
-            ("productType", "Desktop"),
-        ];
-        let (body, sti_body) = tokio::join!(
-            self.get_body(CATALOG_URL, Some(query), None),
-            self.get_body(CATALOG_URL, Some(sti_query), None),
-        );
-        let mut response: CatalogResponse =
-            serde_json::from_str(&body?).context("Adobe 产品目录 JSON 解析失败")?;
-        let sti_response: CatalogResponse =
-            serde_json::from_str(&sti_body?).context("Adobe STI 产品目录 JSON 解析失败")?;
-        response.channels.channel = response
-            .channels
-            .channel
-            .append(sti_response.channels.channel);
-        resolve_response(&response, app, version, beta)
-    }
-
-    pub(super) async fn fetch_application(
-        &self,
-        product: &Product,
-    ) -> Result<(Application, String)> {
-        if product.build_guid.is_empty() {
-            if product.manifest_url.is_some() {
-                bail!(
-                    "产品 {} 使用 manifest 安装，没有 application.json",
-                    product.sap_code
-                );
-            }
-            bail!("缺少必需参数: buildGuid 或 manifestURL");
-        }
-        let query: &[(&str, &str)] = &[
-            ("sapCode", product.sap_code.as_str()),
-            ("baseVersion", product.base_version.as_str()),
-            ("platform", product.platform.as_str()),
-        ];
-        let raw = self
-            .get_body(APPLICATION_URL, Some(query), Some(&product.build_guid))
-            .await
-            .with_context(|| format!("获取 {} application.json 失败", product.sap_code))?;
-        let application = parse_application(&raw, product)
-            .with_context(|| format!("解析 {} application.json 失败", product.sap_code))?;
-        Ok((application, raw))
-    }
-
-    pub(super) async fn get_text(&self, url: &str) -> Result<String> {
-        self.get_body(url, None, None).await
-    }
 }
 
 #[cfg(test)]
@@ -638,18 +400,6 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(products.last().unwrap().sap_code, "PHSPBETA");
-    }
-
-    #[test]
-    fn non_adobe_input_returns_none() {
-        assert!(resolve_from_catalog(&catalog_json(), "WeChat", None, false)
-            .unwrap()
-            .is_none());
-    }
-
-    #[test]
-    fn unknown_version_is_an_error() {
-        assert!(resolve_from_catalog(&catalog_json(), "Photoshop", Some("99.0"), false).is_err());
     }
 
     #[test]

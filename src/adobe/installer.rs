@@ -8,6 +8,8 @@ use super::database;
 use super::model::{Application, DownloadedProduct};
 use super::{pimx, system};
 
+use crate::macos::process;
+
 mod dmg;
 mod payload;
 
@@ -41,7 +43,7 @@ pub fn install_products(
         )
         .with_context(|| format!("解析安装目录 {}", application.install_dir))?;
         if system::is_system_path(&context.install_dir) {
-            system::run_command(Command::new("sudo").arg("-v"), "缓存管理员授权")?;
+            process::run(Command::new("sudo").arg("-v"), "缓存管理员授权")?;
         }
         for downloaded in &product.packages {
             let package = &downloaded.package;
@@ -56,7 +58,9 @@ pub fn install_products(
                     .with_context(|| format!("安装 {}", package.name))?;
                 continue;
             }
-            payload::install_zip_package(downloaded, &mut context, &mut application_xml)?;
+            if let Some(xml) = payload::install_zip_package(downloaded, &mut context)? {
+                application_xml = Some(xml);
+            }
         }
         if index == products.len() - 1 {
             main_path = Some(main_app_path(application, &context.install_dir)?);
@@ -65,7 +69,9 @@ pub fn install_products(
     let main = products.last().expect("产品列表非空");
     if main.application.is_dmg {
         // DMG/PKG 安装器自带注册逻辑，跳过 ZIP 流程的配置与数据库写入
-        return acrobat_main_path();
+        let main_path = acrobat_main_path()?;
+        crate::macos::apps::clear_extended_attributes(&main_path)?;
+        return Ok(main_path);
     }
     let main_path = main_path.expect("循环必然给 main_path 赋值");
     let username = std::env::var("USER").context("获取当前用户名")?;
@@ -79,6 +85,8 @@ pub fn install_products(
     } else {
         database::register(products, language, main_xml).context("写入 Adobe 安装数据库")?;
     }
+    crate::macos::apps::clear_extended_attributes(&main_path)?;
+
     Ok(main_path)
 }
 
@@ -91,13 +99,8 @@ fn map_architecture(uname: &str) -> &'static str {
 }
 
 fn current_architecture() -> Result<String> {
-    let output = Command::new("uname")
-        .arg("-m")
-        .output()
-        .context("运行 uname")?;
-    if !output.status.success() {
-        bail!("uname 退出码 {:?}", output.status.code());
-    }
+    let output = process::output(Command::new("uname").arg("-m"), "uname")?;
+
     Ok(map_architecture(String::from_utf8_lossy(&output.stdout).trim()).to_owned())
 }
 
@@ -194,39 +197,21 @@ fn save_config(
 
 #[cfg(test)]
 mod tests {
+    use super::super::model::fixtures;
     use super::*;
-    use std::collections::BTreeSet;
 
     fn application() -> Application {
         Application {
-            sap_code: "PHSP".to_owned(),
-            name: "Photoshop".to_owned(),
             family_name: Some("Photoshop".to_owned()),
             product_version: "28.0.0.20".to_owned(),
             base_version: "28.0".to_owned(),
-            platform: "macuniversal".to_owned(),
             install_dir: "[AdobeProgramFiles]/Adobe Photoshop 2027".to_owned(),
             app_launch: "[INSTALLDIR]/Adobe Photoshop 2027.app/Contents/MacOS/Adobe Photoshop 2027"
                 .to_owned(),
             supported_languages: vec!["en_US".to_owned(), "zh_CN".to_owned()],
             cdn: "https://ccmdls.adobe.com".to_owned(),
-            packages: Vec::new(),
-            deferred_packages: BTreeSet::new(),
-            is_dmg: false,
+            ..fixtures::application("PHSP", "Photoshop")
         }
-    }
-
-    #[test]
-    fn acrobat_candidates_order() {
-        let candidates = acrobat_candidates();
-        assert_eq!(
-            candidates[0],
-            PathBuf::from("/Applications/Adobe Acrobat DC/Adobe Acrobat.app")
-        );
-        assert_eq!(
-            candidates[1],
-            PathBuf::from("/Applications/Adobe Acrobat Reader DC.app")
-        );
     }
 
     #[test]

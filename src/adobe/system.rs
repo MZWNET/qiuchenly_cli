@@ -1,3 +1,4 @@
+use crate::macos::process;
 use anyhow::{bail, Context, Result};
 use std::fs;
 use std::os::unix::fs::{symlink, PermissionsExt};
@@ -23,23 +24,10 @@ pub(crate) fn is_system_path(path: &Path) -> bool {
     path.starts_with("/Library") || path.starts_with("/Applications")
 }
 
-pub(crate) fn run_command(command: &mut Command, description: &str) -> Result<()> {
-    let output = command
-        .output()
-        .with_context(|| format!("运行 {description}"))?;
-    if !output.status.success() {
-        bail!(
-            "{description}失败: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
-    }
-    Ok(())
-}
-
 pub(crate) fn install_file(source: &Path, target: &Path) -> Result<()> {
     ensure_parent(target)?;
     if is_system_path(target) {
-        run_command(
+        process::run(
             privileged_command("ditto").arg(source).arg(target),
             &format!("复制 {} 到 {}", source.display(), target.display()),
         )
@@ -55,7 +43,7 @@ fn ensure_parent(target: &Path) -> Result<()> {
         return Ok(());
     };
     if is_system_path(parent) {
-        run_command(
+        process::run(
             privileged_command("mkdir").arg("-p").arg(parent),
             &format!("创建目录 {}", parent.display()),
         )
@@ -107,7 +95,7 @@ fn copy_tree(source: &Path, target: &Path) -> Result<()> {
     }
     if is_system_path(target) {
         ensure_parent(target)?;
-        run_command(
+        process::run(
             privileged_command("ditto").arg(source).arg(target),
             &format!("复制 {} 到 {}", source.display(), target.display()),
         )
@@ -173,7 +161,7 @@ pub(crate) fn create_symlink(pointee: &Path, link: &Path) -> Result<()> {
     }
     ensure_parent(link)?;
     if is_system_path(link) {
-        run_command(
+        process::run(
             privileged_command("ln").arg("-s").arg(pointee).arg(link),
             &format!("创建符号链接 {}", link.display()),
         )
@@ -185,7 +173,7 @@ pub(crate) fn create_symlink(pointee: &Path, link: &Path) -> Result<()> {
 
 pub(crate) fn remove_path(target: &Path) -> Result<()> {
     if is_system_path(target) {
-        run_command(
+        process::run(
             privileged_command("rm").arg("-rf").arg(target),
             &format!("删除 {}", target.display()),
         )
@@ -203,7 +191,7 @@ pub(crate) fn remove_path(target: &Path) -> Result<()> {
 
 pub(crate) fn create_directory(path: &Path) -> Result<()> {
     if is_system_path(path) {
-        run_command(
+        process::run(
             privileged_command("mkdir").arg("-p").arg(path),
             &format!("创建目录 {}", path.display()),
         )

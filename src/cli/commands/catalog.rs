@@ -1,5 +1,6 @@
 use anyhow::{bail, Result};
 
+use crate::config::DEFAULT_CHANNEL;
 use crate::macos::apps::scan_installed_apps;
 use crate::store::{
     catalog::{is_newer, resolve_bundle_id, select_release},
@@ -7,6 +8,8 @@ use crate::store::{
 };
 
 use super::super::args::PageArgs;
+
+const GUI_BUNDLE_ID: &str = "com.qiuchenly.hayaku.gui";
 
 fn trunc(s: &str, n: usize) -> String {
     let mut chars = s.chars();
@@ -18,8 +21,8 @@ fn trunc(s: &str, n: usize) -> String {
     text
 }
 
-pub async fn search(query: &str, page: PageArgs) -> Result<()> {
-    let client = Client::from_config()?;
+pub async fn search(query: &str, page: PageArgs, channel: &str) -> Result<()> {
+    let client = Client::from_channel(channel)?;
     let result = client.search(query, page.page, page.limit).await?;
     println!("共 {} 条结果（第 {} 页）", result.total, page.page);
     for entry in result.list {
@@ -34,8 +37,13 @@ pub async fn search(query: &str, page: PageArgs) -> Result<()> {
     Ok(())
 }
 
-pub async fn categories(key: Option<String>, query: Option<String>, page: PageArgs) -> Result<()> {
-    let client = Client::from_config()?;
+pub async fn categories(
+    key: Option<String>,
+    query: Option<String>,
+    page: PageArgs,
+    channel: &str,
+) -> Result<()> {
+    let client = Client::from_channel(channel)?;
     if let Some(key) = key {
         let result = client
             .category_apps(&key, page.page, page.limit, query.as_deref())
@@ -59,8 +67,8 @@ pub async fn categories(key: Option<String>, query: Option<String>, page: PageAr
     Ok(())
 }
 
-pub async fn info(app: &str, all_versions: bool) -> Result<()> {
-    let client = Client::from_config()?;
+pub async fn info(app: &str, all_versions: bool, channel: &str) -> Result<()> {
+    let client = Client::from_channel(channel)?;
     let bundle_id = resolve_bundle_id(&client, app).await?;
     let result = client.search(&bundle_id, 1, 20).await?;
     if let Some(entry) = result
@@ -113,12 +121,12 @@ pub async fn info(app: &str, all_versions: bool) -> Result<()> {
     Ok(())
 }
 
-pub async fn list(all: bool) -> Result<()> {
+pub async fn list(all: bool, channel: &str) -> Result<()> {
     let installed = scan_installed_apps()?;
     let client = if all {
         None
     } else {
-        Some(Client::from_config()?)
+        Some(Client::from_channel(channel)?)
     };
     let mut shown = 0;
     for app in installed {
@@ -149,10 +157,11 @@ pub async fn list(all: bool) -> Result<()> {
     Ok(())
 }
 
-pub async fn outdated(targets: Vec<String>, beta: bool) -> Result<()> {
+pub async fn outdated(targets: Vec<String>, beta: bool, channel: &str) -> Result<()> {
     let installed = scan_installed_apps()?;
-    let client = Client::from_config()?;
+    let client = Client::from_channel(channel)?;
     let selected = !targets.is_empty();
+    let mut selected_bundle_ids = std::collections::HashSet::new();
     if selected {
         for target in &targets {
             let mut matches = installed.iter().filter(|app| {
@@ -170,15 +179,27 @@ pub async fn outdated(targets: Vec<String>, beta: bool) -> Result<()> {
                     .join(", ");
                 bail!("应用名称 {target} 不明确，请指定 bundle ID：{bundle_ids}");
             }
+            selected_bundle_ids.insert(first.bundle_id.as_str());
         }
     }
     let mut shown = 0;
-    for app in installed.iter().filter(|app| {
-        !selected
-            || targets.iter().any(|target| {
-                app.bundle_id.eq_ignore_ascii_case(target) || app.name.eq_ignore_ascii_case(target)
-            })
-    }) {
+    for app in installed
+        .iter()
+        .filter(|app| !selected || selected_bundle_ids.contains(app.bundle_id.as_str()))
+    {
+        if channel == DEFAULT_CHANNEL && app.bundle_id == GUI_BUNDLE_ID {
+            let update = client.check_gui_update(&app.version).await?;
+            if update.has_update {
+                match update.latest_package {
+                    Some(package) => {
+                        println!("{}  {} -> {}", app.bundle_id, app.version, package.version);
+                    }
+                    None => println!("{}  {} -> 有新版本可用", app.bundle_id, app.version),
+                }
+                shown += 1;
+            }
+            continue;
+        }
         let versions = client.app_versions(&app.bundle_id).await?;
         let Some(latest) = select_release(&versions, None, beta) else {
             if selected {
@@ -208,8 +229,8 @@ pub async fn outdated(targets: Vec<String>, beta: bool) -> Result<()> {
     Ok(())
 }
 
-pub async fn popular() -> Result<()> {
-    let client = Client::from_config()?;
+pub async fn popular(channel: &str) -> Result<()> {
+    let client = Client::from_channel(channel)?;
     for app in client.popular().await? {
         println!(
             "{:<6} {:<40} {:<30} {}",
@@ -218,25 +239,6 @@ pub async fn popular() -> Result<()> {
             trunc(&app.app_name, 28),
             app.version
         );
-    }
-
-    Ok(())
-}
-
-pub async fn store_version(current: &str) -> Result<()> {
-    let client = Client::from_config()?;
-    let update = client.check_gui_update(current).await?;
-    if update.has_update {
-        if let Some(package) = update.latest_package {
-            println!("图形应用商店有新版本: {}", package.version);
-            if let Some(notes) = package.release_notes {
-                println!("{}", notes.replace('\n', " "));
-            }
-        } else {
-            println!("图形应用商店有新版本");
-        }
-    } else {
-        println!("图形应用商店已是最新版本（{current}）");
     }
 
     Ok(())

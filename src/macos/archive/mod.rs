@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use walkdir::WalkDir;
 
+use super::process;
+
 #[derive(Debug, PartialEq, Eq)]
 enum InstallAction {
     CopyApp(PathBuf),
@@ -24,6 +26,9 @@ fn select_install_action(root: &Path, bundle_id: &str) -> Result<InstallAction> 
     let mut found_any = false;
     let mut target_app = None;
     let mut installer = None;
+    let mut unmarked_app = None;
+    let mut multiple_unmarked_apps = false;
+    let mut found_sfx = false;
     let mut entries = WalkDir::new(root)
         .min_depth(1)
         .follow_links(false)
@@ -48,7 +53,17 @@ fn select_install_action(root: &Path, bundle_id: &str) -> Result<InstallAction> 
                     bail!("安装包中包含多个厂商安装器，无法确定要运行的应用");
                 }
                 installer = Some(entry.into_path());
+            } else if name != "Uninstall.app" {
+                if unmarked_app.is_none() {
+                    unmarked_app = Some(entry.into_path());
+                } else {
+                    multiple_unmarked_apps = true;
+                }
             }
+        } else if entry.file_type().is_file()
+            && entry.path().extension().is_some_and(|ext| ext == "sfx")
+        {
+            found_sfx = true;
         }
     }
 
@@ -58,6 +73,11 @@ fn select_install_action(root: &Path, bundle_id: &str) -> Result<InstallAction> 
     if let Some(installer) = installer {
         return Ok(InstallAction::RunInstaller(installer));
     }
+    if target_app.is_none() && found_sfx && !multiple_unmarked_apps {
+        if let Some(app) = unmarked_app {
+            return Ok(InstallAction::RunInstaller(app));
+        }
+    }
 
     target_app
         .map(InstallAction::CopyApp)
@@ -66,35 +86,19 @@ fn select_install_action(root: &Path, bundle_id: &str) -> Result<InstallAction> 
 
 fn copy_app(source: &Path, stage: &Path) -> Result<PathBuf> {
     let staged = stage.join(source.file_name().expect("应用路径必须有文件名"));
-    let output = Command::new("ditto")
-        .arg(source)
-        .arg(&staged)
-        .output()
-        .context("运行 ditto 复制应用")?;
-    if !output.status.success() {
-        bail!(
-            "复制 {} 失败: {}",
-            source.display(),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
+    process::run(
+        Command::new("ditto").arg(source).arg(&staged),
+        &format!("复制 {}", source.display()),
+    )?;
 
     Ok(staged)
 }
 
 fn run_installer(path: &Path, bundle_id: &str) -> Result<PathBuf> {
-    let output = Command::new("open")
-        .arg("-W")
-        .arg(path)
-        .output()
-        .context("运行厂商安装器")?;
-    if !output.status.success() {
-        bail!(
-            "运行安装器 {} 失败: {}",
-            path.display(),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
+    process::run(
+        Command::new("open").arg("-W").arg(path),
+        &format!("安装器 {}", path.display()),
+    )?;
 
     Ok(crate::macos::apps::find_installed_app(bundle_id)
         .with_context(|| format!("安装器已退出，但未找到目标应用 {bundle_id}"))?
@@ -125,19 +129,13 @@ pub fn install(archive: &Path, destination: &Path, bundle_id: &str) -> Result<Pa
         .unwrap_or_default();
     let prepared = if extension.eq_ignore_ascii_case("zip") {
         let extraction = tempfile::tempdir().context("创建解压目录")?;
-        let output = Command::new("ditto")
-            .args(["-x", "-k"])
-            .arg(archive)
-            .arg(extraction.path())
-            .output()
-            .context("运行 ditto 解压")?;
-        if !output.status.success() {
-            bail!(
-                "解压 {} 失败: {}",
-                archive.display(),
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
+        process::run(
+            Command::new("ditto")
+                .args(["-x", "-k"])
+                .arg(archive)
+                .arg(extraction.path()),
+            &format!("解压 {}", archive.display()),
+        )?;
         prepare_install(extraction.path(), destination, bundle_id)?
     } else if extension.eq_ignore_ascii_case("dmg") {
         let mut image = MountedImage::attach(archive)?;
@@ -150,10 +148,13 @@ pub fn install(archive: &Path, destination: &Path, bundle_id: &str) -> Result<Pa
             archive.display()
         );
     };
-    match prepared {
-        PreparedInstall::Staged(stage, staged) => publish(stage, &staged, destination),
-        PreparedInstall::Installed(path) => Ok(path),
-    }
+    let installed = match prepared {
+        PreparedInstall::Staged(stage, staged) => publish(stage, &staged, destination)?,
+        PreparedInstall::Installed(path) => path,
+    };
+    crate::macos::apps::clear_extended_attributes(&installed)?;
+
+    Ok(installed)
 }
 
 #[cfg(test)]
@@ -199,6 +200,39 @@ mod tests {
     fn selects_single_matching_app_for_copy() {
         let dir = tempfile::tempdir().unwrap();
         create_app(dir.path(), "Example.app", "com.example.app");
+        assert_eq!(
+            select_install_action(dir.path(), "com.example.app").unwrap(),
+            InstallAction::CopyApp(dir.path().join("Example.app"))
+        );
+    }
+
+    #[test]
+    fn selects_single_sfx_launcher_as_installer() {
+        let dir = tempfile::tempdir().unwrap();
+        create_app(
+            dir.path(),
+            "MuMuLauncher.app",
+            "com.netease.mumu.nemux.launcher",
+        );
+        fs::create_dir_all(dir.path().join(".mumu")).unwrap();
+        fs::write(dir.path().join(".mumu/MuMuPlayer.sfx"), b"").unwrap();
+        assert_eq!(
+            select_install_action(dir.path(), "com.netease.mumu.nemux").unwrap(),
+            InstallAction::RunInstaller(dir.path().join("MuMuLauncher.app"))
+        );
+    }
+
+    #[test]
+    fn selects_matching_app_over_sfx_launcher() {
+        let dir = tempfile::tempdir().unwrap();
+        create_app(dir.path(), "Example.app", "com.example.app");
+        create_app(
+            dir.path(),
+            "MuMuLauncher.app",
+            "com.netease.mumu.nemux.launcher",
+        );
+        fs::create_dir_all(dir.path().join(".mumu")).unwrap();
+        fs::write(dir.path().join(".mumu/MuMuPlayer.sfx"), b"").unwrap();
         assert_eq!(
             select_install_action(dir.path(), "com.example.app").unwrap(),
             InstallAction::CopyApp(dir.path().join("Example.app"))

@@ -273,15 +273,11 @@ fn processor_family(platform: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adobe::model::{DownloadedPackage, Package};
-    use std::collections::BTreeSet;
+    use crate::adobe::model::{fixtures, DownloadedPackage, Package};
     use std::path::PathBuf;
 
     fn application(sap_code: &str, name: &str, product_version: &str) -> Application {
         Application {
-            sap_code: sap_code.to_owned(),
-            name: name.to_owned(),
-            family_name: None,
             product_version: product_version.to_owned(),
             base_version: product_version
                 .split('.')
@@ -289,14 +285,11 @@ mod tests {
                 .unwrap_or_default()
                 .to_owned()
                 + ".0",
-            platform: "macuniversal".to_owned(),
             install_dir: format!("[AdobeProgramFiles]/{name}"),
             app_launch: format!("[INSTALLDIR]/{name}.app/Contents/MacOS/{name}"),
             supported_languages: vec!["en_US".to_owned()],
             cdn: "https://ccmdls.adobe.com".to_owned(),
-            packages: Vec::new(),
-            deferred_packages: BTreeSet::new(),
-            is_dmg: false,
+            ..fixtures::application(sap_code, name)
         }
     }
 
@@ -307,15 +300,10 @@ mod tests {
         package: &str,
     ) -> DownloadedProduct {
         let package = Package {
-            name: package.to_owned(),
             version: version.to_owned(),
             full_name: package.to_owned(),
             path: format!("/AdobeProducts/{sap_code}/{package}.zip"),
-            condition: None,
-            download_size: None,
-            sha256: None,
-            install_sequence: 7000,
-            alias_name: None,
+            ..fixtures::package(package, 7000, None)
         };
         let path = PathBuf::from(format!("/tmp/{}.zip", package.name));
         DownloadedProduct {

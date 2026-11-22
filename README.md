@@ -48,19 +48,30 @@ qiuchenly install PHSP
 qiuchenly install PHSP --language zh_CN
 
 # Automatic version selection picks the latest stable release; --beta lets it pick betas,
-# an explicit --version is never filtered (outdated and community download support --beta too)
+# an explicit --version is never filtered (outdated supports --beta too)
 qiuchenly download <APP> --version <VERSION>
 qiuchenly install <APP> --beta
 
 # Download or install the pre-cracked package instead of the official one (requires login)
 qiuchenly install <APP> --precracked
 
-# List installed apps and check for available updates
+# List installed apps and check for available updates, including the original GUI when installed
 qiuchenly list --all
 qiuchenly outdated
 
 # Uninstall an app and clean up leftovers (TARGET is a Bundle ID or .app path)
 qiuchenly uninstall <BUNDLE_ID> --dry-run
+
+# Refresh the cached injectable-app list (downloads only when a newer store version is available); --list shows supported apps without the GUI installed
+qiuchenly inject --update
+qiuchenly inject --list
+
+# Manage named API sources; the built-in default is used unless --channel selects another
+# BASE_URL is an API root compatible with the default https://api1.xkji.com/api/v1 contract
+qiuchenly channel list
+qiuchenly channel add <NAME> <BASE_URL>
+qiuchenly search <APP> --channel <NAME>
+qiuchenly channel remove <NAME>
 ```
 
 ## Account & Additional Features
@@ -76,6 +87,6 @@ qiuchenly whoami
 qiuchenly logout
 ```
 
-Other subcommands include browsing categories (`categories`), popular apps (`popular`), community releases (`community`), orphaned leftover cleanup (`cleanup`), uninstall history and rules (`history`, `rules`), and app injection (`inject`) that reads existing local Hayaku configurations and resources.
+Other subcommands include browsing categories (`categories`), popular apps (`popular`), orphaned leftover cleanup (`cleanup`), uninstall history and rules (`history`, `rules`), and app injection (`inject`), where injecting or restoring an app reads existing local Hayaku configurations and resources.
 
 Run `qiuchenly --help` or `qiuchenly <COMMAND> --help` for full command and option details.

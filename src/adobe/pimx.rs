@@ -1,6 +1,7 @@
 use super::system::{
-    self, copy_asset, create_symlink, is_system_path, privileged_command, remove_path, run_command,
+    self, copy_asset, create_symlink, is_system_path, privileged_command, remove_path,
 };
+use crate::macos::process;
 use anyhow::{bail, Context, Result};
 use roxmltree::Node;
 use std::fs;
@@ -135,32 +136,30 @@ fn unknown_placeholder(text: &str) -> Option<String> {
     None
 }
 
-pub(crate) fn install_pimx(
-    xml: &str,
-    context: &InstallContext,
-    application_xml: &mut Option<PathBuf>,
-) -> Result<()> {
+pub(crate) fn install_pimx(xml: &str, context: &InstallContext) -> Result<Option<PathBuf>> {
     let document = roxmltree::Document::parse(xml).context("解析 PIMX XML")?;
     let root = document.root_element();
     if root.tag_name().name() != "Package" {
         bail!("PIMX 根节点不是 Package: {}", root.tag_name().name());
     }
+    let mut application_xml = None;
     for section in root.children().filter(Node::is_element) {
         match section.tag_name().name() {
-            "Assets" => install_assets(&section, context, application_xml)?,
+            "Assets" => {
+                if let Some(xml) = install_assets(&section, context)? {
+                    application_xml = Some(xml);
+                }
+            }
             "Commands" => run_commands(&section, context)?,
             // Condition 已在下载阶段按包过滤，无需重复判断
             _ => {}
         }
     }
-    Ok(())
+    Ok(application_xml)
 }
 
-fn install_assets(
-    assets: &Node,
-    context: &InstallContext,
-    application_xml: &mut Option<PathBuf>,
-) -> Result<()> {
+fn install_assets(assets: &Node, context: &InstallContext) -> Result<Option<PathBuf>> {
+    let mut application_xml = None;
     for asset in assets.children().filter(Node::is_element) {
         if asset.tag_name().name() != "Asset" {
             bail!("Assets 中出现未知节点: {}", asset.tag_name().name());
@@ -184,12 +183,14 @@ fn install_assets(
         let target = validate_target(&context.expand(target)?)?;
         copy_asset(Path::new(&source), &target, recursive)
             .with_context(|| format!("安装资产 {source} 到 {}", target.display()))?;
-        track_application_xml(&target, application_xml);
+        if let Some(xml) = application_xml_path(&target) {
+            application_xml = Some(xml);
+        }
     }
-    Ok(())
+    Ok(application_xml)
 }
 
-fn track_application_xml(target: &Path, tracked: &mut Option<PathBuf>) {
+fn application_xml_path(target: &Path) -> Option<PathBuf> {
     let in_amt = target
         .parent()
         .is_some_and(|parent| parent.file_name().is_some_and(|name| name == "AMT"));
@@ -197,7 +198,7 @@ fn track_application_xml(target: &Path, tracked: &mut Option<PathBuf>) {
         if target.file_name().is_some_and(|name| name == "AMT") {
             let xml = target.join("application.xml");
             if xml.is_file() {
-                *tracked = Some(xml);
+                return Some(xml);
             }
         }
     } else if in_amt
@@ -205,8 +206,9 @@ fn track_application_xml(target: &Path, tracked: &mut Option<PathBuf>) {
             .file_name()
             .is_some_and(|name| name == "application.xml")
     {
-        *tracked = Some(target.to_path_buf());
+        return Some(target.to_path_buf());
     }
+    None
 }
 
 fn validate_target(target: &str) -> Result<PathBuf> {
@@ -259,13 +261,13 @@ fn run_permission(command: &Node, context: &InstallContext) -> Result<()> {
     let value = child_text(command, "PermissionValue")
         .context("Permission 缺少 PermissionValue")?
         .trim();
-    let mut process = if is_system_path(&path) {
+    let mut chmod = if is_system_path(&path) {
         privileged_command("chmod")
     } else {
         Command::new("chmod")
     };
-    run_command(
-        process.args(["-R", value]).arg(&path),
+    process::run(
+        chmod.args(["-R", value]).arg(&path),
         &format!("设置 {} 权限为 {value}", path.display()),
     )
 }
@@ -278,7 +280,7 @@ fn run_owner(command: &Node, context: &InstallContext) -> Result<()> {
     let group = child_text(command, "Group")
         .context("Owner 缺少 Group")?
         .trim();
-    run_command(
+    process::run(
         privileged_command("chown")
             .arg("-R")
             .arg(format!("{user}:{group}"))
@@ -292,7 +294,7 @@ fn register_application(command: &Node, context: &InstallContext) -> Result<()> 
     if !Path::new(LSREGISTER).exists() {
         bail!("lsregister 工具不存在");
     }
-    run_command(
+    process::run(
         Command::new(LSREGISTER).arg("-f").arg(&path),
         &format!("注册应用 {}", path.display()),
     )
@@ -523,8 +525,7 @@ mod tests {
             <Asset source="[StagingFolder]/payload.txt" target="[UserPreferences]/ignored.txt" ignoreAsset="true"/>
         </Assets></Package>"#;
         let context = test_context(staging.path(), home.path());
-        let mut tracked = None;
-        install_pimx(xml, &context, &mut tracked).unwrap();
+        let tracked = install_pimx(xml, &context).unwrap();
         let preferences = home.path().join("Library/Preferences");
         assert_eq!(
             fs::read_to_string(preferences.join("payload.txt")).unwrap(),
@@ -555,20 +556,21 @@ mod tests {
             <Asset source="[StagingFolder]/AMT/application.xml" target="[UserCommon]/Adobe/Test/Alt/AMT/application.xml"/>
         </Assets></Package>"#;
         let context = test_context(staging.path(), home.path());
-        let mut tracked = None;
-        install_pimx(xml, &context, &mut tracked).unwrap();
+        let mut tracked = install_pimx(xml, &context).unwrap();
         let base = home.path().join("Library/Application Support/Adobe/Test");
         assert_eq!(
             tracked,
             Some(base.join("Alt").join("AMT").join("application.xml"))
         );
-        install_pimx("<Package/>", &context, &mut tracked).unwrap();
+        assert_eq!(install_pimx("<Package/>", &context).unwrap(), None);
         assert_eq!(
             tracked,
             Some(base.join("Alt").join("AMT").join("application.xml"))
         );
         let next_xml = r#"<Package><Assets><Asset source="[StagingFolder]/AMT/application.xml" target="[UserCommon]/Adobe/Test/Last/AMT/application.xml"/></Assets></Package>"#;
-        install_pimx(next_xml, &context, &mut tracked).unwrap();
+        if let Some(xml) = install_pimx(next_xml, &context).unwrap() {
+            tracked = Some(xml);
+        }
         assert_eq!(
             tracked,
             Some(base.join("Last").join("AMT").join("application.xml"))
@@ -589,7 +591,7 @@ mod tests {
             <Asset source="[StagingFolder]/Bundle" target="[UserCommon]/Adobe/Test/Bundle" recursive="true"/>
         </Assets></Package>"#;
         let context = test_context(staging.path(), home.path());
-        install_pimx(xml, &context, &mut None).unwrap();
+        install_pimx(xml, &context).unwrap();
         let target = home
             .path()
             .join("Library/Application Support/Adobe/Test/Bundle");
@@ -615,7 +617,7 @@ mod tests {
             <Asset source="[StagingFolder]/x" target="[UserPreferences]/../../../evil.txt"/>
         </Assets></Package>"#;
         let context = test_context(staging.path(), home.path());
-        let error = install_pimx(xml, &context, &mut None).unwrap_err();
+        let error = install_pimx(xml, &context).unwrap_err();
         assert!(error.to_string().contains("穿越"));
     }
 
@@ -625,7 +627,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let xml = r#"<Package><Commands><MysteryCommand><Path>[INSTALLDIR]</Path></MysteryCommand></Commands></Package>"#;
         let context = test_context(staging.path(), home.path());
-        let error = install_pimx(xml, &context, &mut None).unwrap_err();
+        let error = install_pimx(xml, &context).unwrap_err();
         assert!(error.to_string().contains("不支持的 PIMX 命令"));
     }
 }

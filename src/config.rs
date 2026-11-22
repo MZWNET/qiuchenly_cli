@@ -1,7 +1,11 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
+
+pub const DEFAULT_CHANNEL: &str = "default";
+pub const DEFAULT_BASE: &str = "https://api1.xkji.com/api/v1";
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Config {
@@ -13,6 +17,20 @@ pub struct Config {
     pub username: Option<String>,
     #[serde(default)]
     pub download_dir: Option<String>,
+    #[serde(default)]
+    pub channels: BTreeMap<String, String>,
+}
+
+impl Config {
+    pub fn channel_base(&self, name: &str) -> Result<&str> {
+        if name == DEFAULT_CHANNEL {
+            return Ok(DEFAULT_BASE);
+        }
+        self.channels
+            .get(name)
+            .map(String::as_str)
+            .ok_or_else(|| anyhow::anyhow!("未知渠道：{name}，请先运行 qiuchenly channel add"))
+    }
 }
 
 pub fn config_dir() -> Result<PathBuf> {

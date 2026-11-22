@@ -1,12 +1,14 @@
 mod models;
 
 pub use models::{
-    AppVersion, CatalogList, Category, CategoryApps, GuiUpdate, Popular, PopularBind,
+    AppVersion, CatalogList, Category, CategoryApps, GuiUpdate, GuiUpdateDownload, Popular,
+    PopularBind,
 };
 
 use super::client::Client;
 use crate::macos::apps::scan_installed_apps;
 use anyhow::{Context, Result};
+use models::LatestPackage;
 
 impl Client {
     pub async fn search(&self, keyword: &str, page: u32, size: u32) -> Result<CatalogList> {
@@ -56,6 +58,21 @@ impl Client {
         self.get(
             &format!("/public/checkGuiAppUpdate/{version}"),
             &[("updateCheckType", "beta".into())],
+        )
+        .await
+    }
+
+    pub async fn download_gui_update(
+        &self,
+        version: &str,
+        package: &LatestPackage,
+    ) -> Result<GuiUpdateDownload> {
+        self.post(
+            &format!("/public/downloadGuiAppUpdate/{version}"),
+            &serde_json::json!({
+                "beta": package.beta,
+                "fullVersion": package.full_version,
+            }),
         )
         .await
     }

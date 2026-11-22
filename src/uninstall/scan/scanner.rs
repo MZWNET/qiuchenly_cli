@@ -4,20 +4,21 @@ use super::matcher::{
     node_kind, type_matches,
 };
 use super::source::{scan_source_rule, SkipPaths};
+use super::walk::walk_tree;
 use crate::rules::source::{AppContext, SourceProtection};
 use crate::rules::{self, RuleDoc, RuleEntry};
 use anyhow::Result;
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
+use walkdir::{DirEntry, WalkDir};
 
 pub(in crate::uninstall) struct Scanner {
     pub doc: RuleDoc,
     pub items: Vec<ScanItem>,
     pub(in crate::uninstall) protection: SourceProtection,
     pub(in crate::uninstall) skip: SkipPaths,
-    target: Option<AppContext>,
+    target_bundle_id: Option<String>,
 }
 
 impl Scanner {
@@ -29,34 +30,19 @@ impl Scanner {
             items: Vec::new(),
             protection,
             skip,
-            target: None,
+            target_bundle_id: None,
         })
     }
 
     /// 按目标 App 扫描：编译规则全量扫，源码规则只扫匹配目标的
-    pub fn scan_app(&mut self, app: &AppContext) {
-        self.target = Some(app.clone());
+    pub fn scan_target(&mut self, context: &AppContext) {
+        self.target_bundle_id = context.bundle_id.clone();
         self.scan_compiled();
         for entry in &self.doc.rules {
             let RuleEntry::Source(rule) = entry else {
                 continue;
             };
-            if let Some(context) = rule.target_context(app) {
-                scan_source_rule(rule, &context, &self.skip, &mut self.items);
-            }
-        }
-    }
-
-    /// 只知道 bundleId 的残留扫描
-    pub fn scan_bundle(&mut self, bundle_id: &str) {
-        let context = AppContext::bundle_id(bundle_id);
-        self.target = Some(context.clone());
-        self.scan_compiled();
-        for entry in &self.doc.rules {
-            let RuleEntry::Source(rule) = entry else {
-                continue;
-            };
-            if let Some(context) = rule.target_context(&context) {
+            if let Some(context) = rule.target_context(context) {
                 scan_source_rule(rule, &context, &self.skip, &mut self.items);
             }
         }
@@ -64,7 +50,6 @@ impl Scanner {
 
     /// 孤儿扫描：只扫声明了明确 App 对象且该 App 未安装的源码规则
     pub fn scan_orphans(&mut self, installed: &[AppContext]) {
-        self.target = None;
         self.scan_compiled();
         let fallback = AppContext::default();
         for entry in &self.doc.rules {
@@ -107,61 +92,22 @@ impl Scanner {
             if !fs::symlink_metadata(&root).is_ok_and(|m| m.is_dir()) {
                 continue;
             }
-            let mut walk = WalkDir::new(&root).follow_links(false);
-            if rule.deep >= 0 {
-                walk = walk.max_depth(rule.deep as usize);
-            }
-            for entry in walk
-                .into_iter()
-                .filter_entry(|entry| {
-                    entry.depth() == 0
-                        || (!skip_paths.contains(entry.path()) && !self.skip.contains(entry.path()))
-                })
-                .flatten()
-            {
-                let path = entry.path();
-                let Ok(metadata) = fs::symlink_metadata(path) else {
-                    continue;
-                };
-                let name = path
-                    .file_name()
-                    .map(|n| n.to_string_lossy())
-                    .unwrap_or_default();
-                let kind = node_kind(path, &metadata);
-                let mut matched = false;
-                let mut domain = None;
-                let mut separate = None;
-                let mut is_system = None;
-                for filter in &rule.filters {
-                    if (filter.deep >= 0 && filter.deep != entry.depth() as i64)
-                        || !type_matches(filter, kind)
-                        || !name_matches(filter, &name)
-                    {
-                        continue;
-                    }
-                    matched = true;
-                    domain = filter.domain.as_ref();
-                    separate = filter.separate;
-                    is_system = filter.is_system;
-                }
-                if !matched || separate == Some(false) {
-                    continue;
-                }
-                self.items.push(ScanItem {
-                    path: path.to_path_buf(),
-                    deletable: !is_system.unwrap_or(false),
-                    confidence: if domain.is_some() || infer_domain(&name).is_some() {
-                        "high"
-                    } else {
-                        "medium"
-                    },
-                    size_bytes: None,
-                    reason: is_system.unwrap_or(false).then(|| "系统组件".to_string()),
-                    shared_with: Vec::new(),
-                    identity: Identity::from_metadata(&metadata),
-                    from_source: false,
-                });
-            }
+            // 根目录本身也可作候选，不参与 skip 判断
+            push_compiled_matches(rule, &root, 0, &mut self.items);
+            let skip = &self.skip;
+            let is_skipped = |path: &Path| skip_paths.contains(path) || skip.contains(path);
+            let items = &mut self.items;
+            let visit = |entry: &DirEntry| {
+                push_compiled_matches(rule, entry.path(), entry.depth() as i64, items);
+                // 命中不剪枝，同级候选继续
+                false
+            };
+            walk_tree(
+                &root,
+                (rule.deep >= 0).then_some(rule.deep as usize),
+                is_skipped,
+                visit,
+            );
         }
     }
 
@@ -198,17 +144,14 @@ impl Scanner {
 
     /// protect 规则最后覆盖所有候选：路径命中或 bundle 命中即不可删
     fn apply_source_protection(&mut self) {
-        let target_bundle = self
-            .target
-            .as_ref()
-            .and_then(|context| context.bundle_id.clone());
+        let target_bundle_id = self.target_bundle_id.clone();
         for item in &mut self.items {
             if let Some(reason) = self.protection.path_reason(&item.path) {
                 item.deletable = false;
                 item.reason = Some(reason.to_string());
                 continue;
             }
-            let domain = infer_domain_from_path(&item.path).or(target_bundle.clone());
+            let domain = infer_domain_from_path(&item.path).or_else(|| target_bundle_id.clone());
             if let Some(reason) = domain
                 .as_deref()
                 .and_then(|domain| self.protection.bundle_reason(domain))
@@ -247,6 +190,51 @@ impl Scanner {
 
 fn is_ancestor(parent: &Path, child: &Path) -> bool {
     child.starts_with(parent)
+}
+
+/// 编译规则按 filter 匹配后加入候选，只负责匹配不负责遍历
+fn push_compiled_matches(rule: &rules::Rule, path: &Path, depth: i64, out: &mut Vec<ScanItem>) {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return;
+    };
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy())
+        .unwrap_or_default();
+    let kind = node_kind(path, &metadata);
+    let mut matched = false;
+    let mut domain = None;
+    let mut separate = None;
+    let mut is_system = None;
+    for filter in &rule.filters {
+        if (filter.deep >= 0 && filter.deep != depth)
+            || !type_matches(filter, kind)
+            || !name_matches(filter, &name)
+        {
+            continue;
+        }
+        matched = true;
+        domain = filter.domain.as_ref();
+        separate = filter.separate;
+        is_system = filter.is_system;
+    }
+    if !matched || separate == Some(false) {
+        return;
+    }
+    out.push(ScanItem {
+        path: path.to_path_buf(),
+        deletable: !is_system.unwrap_or(false),
+        confidence: if domain.is_some() || infer_domain(&name).is_some() {
+            "high"
+        } else {
+            "medium"
+        },
+        size_bytes: None,
+        reason: is_system.unwrap_or(false).then(|| "系统组件".to_string()),
+        shared_with: Vec::new(),
+        identity: Identity::from_metadata(&metadata),
+        from_source: false,
+    });
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

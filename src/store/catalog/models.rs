@@ -88,6 +88,18 @@ pub struct GuiUpdate {
 #[derive(Debug, Deserialize)]
 pub struct LatestPackage {
     pub version: String,
-    #[serde(rename = "releaseNotes", default)]
-    pub release_notes: Option<String>,
+    #[serde(rename = "fullVersion", default)]
+    pub full_version: String,
+    #[serde(default)]
+    pub beta: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GuiUpdateDownload {
+    #[serde(rename = "downloadUrl")]
+    pub download_url: String,
+    #[serde(default)]
+    pub file_name: Option<String>,
+    pub sha256: String,
+    pub version: String,
 }

@@ -1,4 +1,5 @@
 pub mod aria2;
+pub(crate) mod checksum;
 
 use crate::config;
 use crate::macos::archive;
@@ -21,22 +22,27 @@ pub struct InstallOptions<'a> {
 }
 
 pub async fn resolve_download(
-    client: &Client,
     app: &str,
     version: Option<&str>,
     beta: bool,
     is_precracked: bool,
+    channel: &str,
 ) -> Result<ResolvedDownload> {
+    let client = if is_precracked {
+        Client::authenticated_channel(channel)?
+    } else {
+        Client::from_channel(channel)?
+    };
     if is_precracked {
         let (bundle_id, download) =
-            precracked::resolve_download(client, app, version, beta).await?;
+            precracked::resolve_download(&client, app, version, beta).await?;
         Ok(ResolvedDownload {
             bundle_id,
             url: download.download_url,
             file_name: download.file_name,
         })
     } else {
-        let (bundle_id, version) = catalog::resolve_version(client, app, version, beta).await?;
+        let (bundle_id, version) = catalog::resolve_version(&client, app, version, beta).await?;
         Ok(ResolvedDownload {
             bundle_id,
             url: version.url,
@@ -74,15 +80,15 @@ pub async fn download_file(
 }
 
 pub async fn install(
-    client: &Client,
     downloader: &Downloader,
     app: &str,
     version: Option<&str>,
     beta: bool,
     is_precracked: bool,
+    channel: &str,
     options: &InstallOptions<'_>,
 ) -> Result<PathBuf> {
-    let resolved = match resolve_download(client, app, version, beta, is_precracked).await {
+    let resolved = match resolve_download(app, version, beta, is_precracked, channel).await {
         Ok(resolved) => {
             if options.language.is_some() {
                 anyhow::bail!("--language 仅适用于 Adobe 安装");

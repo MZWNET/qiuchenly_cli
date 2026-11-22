@@ -19,13 +19,12 @@ fn extract_zip(archive: &Path) -> Result<tempfile::TempDir> {
 pub(super) fn install_zip_package(
     downloaded: &DownloadedPackage,
     context: &mut pimx::InstallContext,
-    application_xml: &mut Option<PathBuf>,
-) -> Result<()> {
+) -> Result<Option<PathBuf>> {
     let package = &downloaded.package;
     let staging =
         extract_zip(&downloaded.path).with_context(|| format!("解压 {}", package.full_name))?;
     context.staging_folder = staging.path().to_path_buf();
-    install_pimx_package(downloaded, staging.path(), context, application_xml)
+    install_pimx_package(downloaded, staging.path(), context)
         .with_context(|| format!("安装包 {}", package.full_name))
 }
 
@@ -33,15 +32,13 @@ fn install_pimx_package(
     downloaded: &DownloadedPackage,
     staging: &Path,
     context: &pimx::InstallContext,
-    application_xml: &mut Option<PathBuf>,
-) -> Result<()> {
+) -> Result<Option<PathBuf>> {
     let package = &downloaded.package;
     let pimx_path = find_pimx(staging, &package.name)
         .with_context(|| format!("在包 {} 中查找 PIMX", package.full_name))?;
     let bytes = fs::read(&pimx_path).with_context(|| format!("读取 {}", pimx_path.display()))?;
     let xml = pimx::decode_pimx(&bytes)?;
-    pimx::install_pimx(&xml, context, application_xml)
-        .with_context(|| format!("安装 PIMX {}", package.full_name))
+    pimx::install_pimx(&xml, context).with_context(|| format!("安装 PIMX {}", package.full_name))
 }
 
 fn find_pimx(root: &Path, package_name: &str) -> Result<PathBuf> {

@@ -1,9 +1,9 @@
 use anyhow::{bail, Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub(super) struct AppConfig {
     #[serde(rename = "packageName")]
     pub package_name: PackageName,
@@ -60,7 +60,7 @@ impl AppConfig {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(untagged)]
 pub(super) enum PackageName {
     One(String),
@@ -76,20 +76,57 @@ impl PackageName {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub(super) struct InjectConfig {
     #[serde(default, rename = "AppList")]
     pub app_list: Vec<AppConfig>,
 }
 
+#[derive(Serialize, Deserialize)]
+pub(super) struct CachedInjectList {
+    #[serde(rename = "storeVersion")]
+    pub store_version: String,
+    pub config: InjectConfig,
+}
+
+fn cached_path() -> Result<PathBuf> {
+    Ok(crate::config::config_dir()?.join("inject-list.json"))
+}
+
+pub(super) fn load_cached() -> Result<Option<CachedInjectList>> {
+    let path = cached_path()?;
+    if !path.exists() {
+        return Ok(None);
+    }
+    let data = fs::read(&path).with_context(|| format!("读取 {}", path.display()))?;
+
+    serde_json::from_slice(&data)
+        .with_context(|| format!("解析 {} 失败", path.display()))
+        .map(Some)
+}
+
+pub(super) fn save_cached(cached: &CachedInjectList) -> Result<()> {
+    let path = cached_path()?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("创建 {}", parent.display()))?;
+    }
+    let data = serde_json::to_string_pretty(cached).context("序列化注入列表失败")?;
+    fs::write(&path, data).with_context(|| format!("写入 {}", path.display()))
+}
+
 pub(super) fn load() -> Result<InjectConfig> {
     let override_path = std::env::var_os("HAYAKU_CONFIG").map(PathBuf::from);
-    let default_path = Path::new("/Library/Application Support/Hayaku/config.json");
-    for path in override_path
-        .as_deref()
-        .into_iter()
-        .chain(std::iter::once(default_path))
-    {
+    let default_paths = [
+        Path::new("/Library/Application Support/Hayaku/config.json"),
+        Path::new("/Library/Application Support/Hayaku/active/config.json"),
+        Path::new(
+            "/Library/Application Support/Hayaku/HayakuDaemon.app/Contents/Resources/config.json",
+        ),
+        Path::new(
+            "/Applications/QiuChenAppStore.app/Contents/Resources/HayakuDaemon.app/Contents/Resources/config.json",
+        ),
+    ];
+    for path in override_path.as_deref().into_iter().chain(default_paths) {
         if path.exists() {
             let data = fs::read(path).with_context(|| format!("读取 {}", path.display()))?;
 
@@ -98,10 +135,7 @@ pub(super) fn load() -> Result<InjectConfig> {
         }
     }
 
-    bail!(
-        "找不到注入配置（HAYAKU_CONFIG={override_path:?}，默认 {}）",
-        default_path.display()
-    )
+    bail!("找不到注入配置；用 HAYAKU_CONFIG 指定 config.json 路径")
 }
 
 pub(super) fn find_dylib_source() -> Result<PathBuf> {

@@ -79,3 +79,40 @@ pub(super) fn platform_preference() -> &'static [&'static str] {
         &["macuniversal", "osx10-64", "osx10"]
     }
 }
+
+#[cfg(test)]
+pub(super) mod fixtures {
+    use super::*;
+
+    pub(in crate::adobe) fn application(sap_code: &str, name: &str) -> Application {
+        Application {
+            sap_code: sap_code.to_owned(),
+            name: name.to_owned(),
+            family_name: None,
+            product_version: "1.0.0.1".to_owned(),
+            base_version: "1.0".to_owned(),
+            platform: "macuniversal".to_owned(),
+            install_dir: "[AdobeProgramFiles]/Test".to_owned(),
+            app_launch: String::new(),
+            supported_languages: Vec::new(),
+            cdn: "https://cdn.example.com".to_owned(),
+            packages: Vec::new(),
+            deferred_packages: BTreeSet::new(),
+            is_dmg: false,
+        }
+    }
+
+    pub(in crate::adobe) fn package(name: &str, sequence: u64, condition: Option<&str>) -> Package {
+        Package {
+            name: name.to_owned(),
+            version: "1.0".to_owned(),
+            full_name: format!("{name}.zip"),
+            path: format!("/AdobeProducts/{name}.zip"),
+            condition: condition.map(str::to_owned),
+            download_size: None,
+            sha256: None,
+            install_sequence: sequence,
+            alias_name: None,
+        }
+    }
+}

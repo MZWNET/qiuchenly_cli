@@ -1,9 +1,7 @@
-use crate::config;
+use crate::config::{self, DEFAULT_BASE, DEFAULT_CHANNEL};
 use anyhow::Result;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-
-const DEFAULT_BASE: &str = "https://api1.xkji.com/api/v1";
 
 #[derive(Deserialize)]
 struct Envelope<T> {
@@ -26,10 +24,11 @@ impl<T> Envelope<T> {
 
 pub struct Client {
     http: reqwest::Client,
+    base: String,
 }
 
 impl Client {
-    pub fn new(token: Option<String>) -> Result<Self> {
+    fn with_base(token: Option<&str>, base: &str) -> Result<Self> {
         let mut headers = reqwest::header::HeaderMap::new();
         if let Some(token) = token {
             headers.insert(
@@ -43,19 +42,34 @@ impl Client {
             .timeout(std::time::Duration::from_secs(120))
             .build()?;
 
-        Ok(Self { http })
+        Ok(Self {
+            http,
+            base: base.to_string(),
+        })
     }
 
-    pub fn from_config() -> Result<Self> {
-        Self::new(config::load()?.token)
+    pub fn new(token: Option<String>) -> Result<Self> {
+        Self::with_base(token.as_deref(), DEFAULT_BASE)
+    }
+
+    pub fn from_channel(name: &str) -> Result<Self> {
+        let cfg = config::load()?;
+
+        Self::with_base(cfg.token.as_deref(), cfg.channel_base(name)?)
     }
 
     pub fn authenticated() -> Result<Self> {
-        let token = config::load()?
+        Self::authenticated_channel(DEFAULT_CHANNEL)
+    }
+
+    pub fn authenticated_channel(name: &str) -> Result<Self> {
+        let cfg = config::load()?;
+        let token = cfg
             .token
+            .as_deref()
             .ok_or_else(|| anyhow::anyhow!("未登录，请先运行 qiuchenly login"))?;
 
-        Self::new(Some(token))
+        Self::with_base(Some(token), cfg.channel_base(name)?)
     }
 
     pub(super) async fn get<T: DeserializeOwned>(
@@ -65,7 +79,7 @@ impl Client {
     ) -> Result<T> {
         let resp: Envelope<T> = self
             .http
-            .get(format!("{DEFAULT_BASE}{path}"))
+            .get(format!("{}{path}", self.base))
             .query(query)
             .send()
             .await?
@@ -83,7 +97,7 @@ impl Client {
     ) -> Result<T> {
         let raw = self
             .http
-            .post(format!("{DEFAULT_BASE}{path}"))
+            .post(format!("{}{path}", self.base))
             .json(body)
             .send()
             .await?;

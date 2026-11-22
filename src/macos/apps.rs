@@ -1,6 +1,7 @@
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use walkdir::{DirEntry, WalkDir};
 
 pub struct InstalledApp {
@@ -85,6 +86,23 @@ pub fn find_installed_app(bundle_id: &str) -> Result<InstalledApp> {
         .into_iter()
         .find(|app| app.bundle_id == bundle_id)
         .ok_or_else(|| anyhow::anyhow!("本地未安装 {bundle_id}"))
+}
+
+pub fn clear_extended_attributes(path: &Path) -> Result<()> {
+    let output = Command::new("/usr/bin/xattr")
+        .arg("-cr")
+        .arg(path)
+        .output()
+        .context("运行 xattr 清理扩展属性")?;
+    if !output.status.success() {
+        bail!(
+            "清理 {} 扩展属性失败: {}",
+            path.display(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

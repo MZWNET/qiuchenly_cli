@@ -5,6 +5,7 @@ use walkdir::WalkDir;
 
 use super::super::model::DownloadedProduct;
 use super::super::system;
+use crate::macos::process;
 
 pub(super) fn install_dmg_package(product: &DownloadedProduct) -> Result<()> {
     let mut dmgs = Vec::new();
@@ -72,16 +73,7 @@ fn install_pkgs(root: &Path) -> Result<()> {
         if let Some((_, path)) = &choices_file {
             command.arg("-applyChoiceChangesXML").arg(path);
         }
-        let output = command
-            .output()
-            .with_context(|| format!("运行 installer {}", pkg.display()))?;
-        if !output.status.success() {
-            bail!(
-                "安装 {} 失败: {}",
-                pkg.display(),
-                String::from_utf8_lossy(&output.stderr).trim()
-            );
-        }
+        process::run(&mut command, &format!("安装 {}", pkg.display()))?;
     }
     Ok(())
 }
@@ -116,20 +108,14 @@ fn extract_choice_identifiers(choices_xml: &str) -> Vec<String> {
 
 // ARMAgent 是 Adobe 后台遥测代理，安装时取消勾选
 fn arma_deselected_choices(pkg: &Path) -> Result<Vec<String>> {
-    let output = system::privileged_command("/usr/sbin/installer")
-        .args(["-showChoicesXML", "-pkg"])
-        .arg(pkg)
-        .arg("-target")
-        .arg("/")
-        .output()
-        .with_context(|| format!("查询 {} 的安装选项", pkg.display()))?;
-    if !output.status.success() {
-        bail!(
-            "查询 {} 安装选项失败: {}",
-            pkg.display(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
-    }
+    let output = process::output(
+        system::privileged_command("/usr/sbin/installer")
+            .args(["-showChoicesXML", "-pkg"])
+            .arg(pkg)
+            .arg("-target")
+            .arg("/"),
+        &format!("查询 {} 的安装选项", pkg.display()),
+    )?;
     let xml = String::from_utf8_lossy(&output.stdout).into_owned();
     Ok(extract_choice_identifiers(&xml)
         .into_iter()
@@ -177,9 +163,6 @@ mod tests {
 </array></plist>"#;
         let identifiers = extract_choice_identifiers(xml);
         assert_eq!(identifiers, vec!["com.adobe.armsvc", "com.adobe.ARMAgent"]);
-        assert!(identifiers
-            .iter()
-            .any(|identifier| identifier.contains("ARMAgent")));
     }
 
     #[test]

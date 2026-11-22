@@ -1,17 +1,19 @@
 use super::item::{Identity, ScanItem};
+use super::walk::walk_tree;
 use crate::rules::source::{
     compile_glob, compile_path_glob, compile_regex, expand_home, expand_placeholders, has_glob,
-    AppContext, DeletePolicy, SourceItem, SourceItemType, SourceProtection, SourceRule,
+    AppContext, DeletePolicy, ProtectionPath, SourceItem, SourceItemType, SourceProtection,
+    SourceRule,
 };
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
+use walkdir::DirEntry;
 
 /// scan=false 的保护路径不作为候选，扫描时跳过
 pub(in crate::uninstall) struct SkipPaths {
     exact: HashSet<PathBuf>,
-    globs: Vec<globset::GlobMatcher>,
+    globs: Vec<ProtectionPath>,
 }
 
 impl SkipPaths {
@@ -25,11 +27,7 @@ impl SkipPaths {
                 continue;
             }
             if protected.has_glob() {
-                if let Some(raw) = protected.path.to_str() {
-                    if let Ok(matcher) = compile_path_glob(raw) {
-                        skip.globs.push(matcher);
-                    }
-                }
+                skip.globs.push(protected.clone());
             } else {
                 skip.exact.insert(protected.path.clone());
             }
@@ -38,10 +36,7 @@ impl SkipPaths {
     }
 
     pub fn contains(&self, path: &Path) -> bool {
-        self.exact.contains(path)
-            || path
-                .to_str()
-                .is_some_and(|path| self.globs.iter().any(|glob| glob.is_match(path)))
+        self.exact.contains(path) || self.globs.iter().any(|glob| glob.direct_match(path))
     }
 }
 
@@ -127,26 +122,11 @@ fn scan_where_item(
                 Err(_) => continue,
             };
             for dir in resolve_roots(&base, skip) {
-                let mut walk = WalkDir::new(&dir)
-                    .max_depth(depth)
-                    .follow_links(false)
-                    .into_iter();
-                while let Some(entry) = walk.next() {
-                    let Ok(entry) = entry else {
-                        continue;
-                    };
-                    if entry.depth() == 0 {
-                        continue;
-                    }
+                let is_skipped = |path: &Path| skip.contains(path);
+                let visit = |entry: &DirEntry| {
                     let path = entry.path();
-                    if skip.contains(path) {
-                        if entry.file_type().is_dir() {
-                            walk.skip_current_dir();
-                        }
-                        continue;
-                    }
                     let Ok(metadata) = fs::symlink_metadata(path) else {
-                        continue;
+                        return false;
                     };
                     let name = path
                         .file_name()
@@ -157,14 +137,12 @@ fn scan_where_item(
                             .as_ref()
                             .is_some_and(|regex| regex.is_match(&name));
                     if !matched || !type_ok(item.kind, &metadata) {
-                        continue;
+                        return false;
                     }
                     push_item(out, rule, item, path.to_path_buf(), &metadata);
-                    // 命中目录后不再深入
-                    if metadata.is_dir() {
-                        walk.skip_current_dir();
-                    }
-                }
+                    metadata.is_dir()
+                };
+                walk_tree(&dir, Some(depth), is_skipped, visit);
             }
         }
     }
@@ -243,43 +221,30 @@ fn glob_paths(expanded: &Path, dirs_only: bool, skip: &SkipPaths) -> Vec<PathBuf
     }
     let mut out = Vec::new();
     // path 里的 * 可跨 /，不限层级；命中目录后也不再深入
-    let mut walk = WalkDir::new(&root).follow_links(false).into_iter();
-    while let Some(entry) = walk.next() {
-        let Ok(entry) = entry else {
-            continue;
-        };
-        if entry.depth() == 0 {
-            continue;
-        }
+    let is_skipped = |path: &Path| skip.contains(path);
+    let visit = |entry: &DirEntry| {
         let path = entry.path();
-        if skip.contains(path) {
-            if entry.file_type().is_dir() {
-                walk.skip_current_dir();
-            }
-            continue;
-        }
         let Some(raw) = path.to_str() else {
-            continue;
+            return false;
         };
         if !matcher.is_match(raw) {
-            continue;
+            return false;
         }
         if dirs_only && !entry.file_type().is_dir() {
-            continue;
+            return false;
         }
         out.push(path.to_path_buf());
-        if entry.file_type().is_dir() {
-            walk.skip_current_dir();
-        }
-    }
+        entry.file_type().is_dir()
+    };
+    walk_tree(&root, None, is_skipped, visit);
     out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rules::{RuleDoc, RuleEntry};
-    use crate::uninstall::scan::Scanner;
+    use crate::rules::RuleDoc;
+    use crate::uninstall::{check_source_uninstaller, scan::Scanner};
     use std::fs;
 
     fn doc_with(rules_json: &str) -> RuleDoc {
@@ -305,14 +270,14 @@ mod tests {
         );
         let mut scanner = scanner_with(&rules);
         let app = AppContext::bundle_id("com.example.Tool");
-        scanner.scan_app(&app);
+        scanner.scan_target(&app);
         assert_eq!(scanner.items.len(), 1);
         assert!(scanner.items[0].from_source);
         assert!(scanner.items[0].deletable);
         assert_eq!(scanner.items[0].confidence, "high");
         // 目标不匹配的 App 不扫
         let mut other = scanner_with(&rules);
-        other.scan_app(&AppContext::bundle_id("com.other.App"));
+        other.scan_target(&AppContext::bundle_id("com.other.App"));
         assert!(other.items.is_empty());
     }
 
@@ -327,7 +292,7 @@ mod tests {
             temp.path().display()
         );
         let mut scanner = scanner_with(&rules);
-        scanner.scan_app(&AppContext::bundle_id("com.example.Tool"));
+        scanner.scan_target(&AppContext::bundle_id("com.example.Tool"));
         let paths: HashSet<PathBuf> = scanner.items.iter().map(|item| item.path.clone()).collect();
         let expected = HashSet::from([
             temp.path().join("Library/Caches/Tool"),
@@ -347,7 +312,7 @@ mod tests {
             temp.path().display()
         );
         let mut scanner = scanner_with(&rules);
-        scanner.scan_app(&AppContext::bundle_id("com.example.Tool"));
+        scanner.scan_target(&AppContext::bundle_id("com.example.Tool"));
         assert_eq!(scanner.items.len(), 2);
     }
 
@@ -365,10 +330,104 @@ mod tests {
             root.display()
         );
         let mut scanner = scanner_with(&rules);
-        scanner.scan_app(&AppContext::bundle_id("com.example.Tool"));
+        scanner.scan_target(&AppContext::bundle_id("com.example.Tool"));
         assert_eq!(scanner.items.len(), 1);
         assert!(scanner.items[0].path.ends_with("shallow.Tool"));
         // depth=2 只到第二层，inner/Tool 不扫；目录命中后也不再深入
+    }
+
+    #[test]
+    fn where_scan_false_protect_dir_prunes_descendants() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("Keep/inner")).unwrap();
+        fs::write(temp.path().join("Keep/keep.log"), "x").unwrap();
+        fs::write(temp.path().join("Keep/inner/keep.log"), "x").unwrap();
+        fs::write(temp.path().join("keep.log"), "x").unwrap();
+        let rules = format!(
+            r#""type":"cache","title":"t","app":{{"bundleId":"com.example.Tool"}},
+                "where":["{}"],"depth":3,
+                "items":[{{"name":"keep.log","what":"缓存","type":"file"}}]"#,
+            temp.path().display()
+        );
+        let protect = format!(
+            r#""type":"protect","title":"p","items":[{{"path":"{}","why":"用户数据","scan":false}}]"#,
+            temp.path().join("Keep").display()
+        );
+        let mut scanner = scanner_with(&format!("{rules}}},{{{protect}"));
+        scanner.scan_target(&AppContext::bundle_id("com.example.Tool"));
+        let paths: Vec<PathBuf> = scanner.items.iter().map(|item| item.path.clone()).collect();
+        assert_eq!(paths, vec![temp.path().join("keep.log")]);
+    }
+
+    #[test]
+    fn path_glob_scan_false_protect_prunes_descendants() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("Library/A1/Tool.app")).unwrap();
+        fs::create_dir_all(temp.path().join("Library/B2/Tool.app")).unwrap();
+        let rules = format!(
+            r#""type":"app","title":"t","app":{{"bundleId":"com.example.Tool"}},
+                "items":[{{"path":"{}/Library/*/Tool.app","what":"本体"}}]"#,
+            temp.path().display()
+        );
+        let protect = format!(
+            r#""type":"protect","title":"p","items":[{{"path":"{}/Library/A*","why":"用户数据","scan":false}}]"#,
+            temp.path().display()
+        );
+        let mut scanner = scanner_with(&format!("{rules}}},{{{protect}"));
+        scanner.scan_target(&AppContext::bundle_id("com.example.Tool"));
+        let paths: HashSet<PathBuf> = scanner.items.iter().map(|item| item.path.clone()).collect();
+        assert_eq!(
+            paths,
+            HashSet::from([temp.path().join("Library/B2/Tool.app")])
+        );
+    }
+
+    #[test]
+    fn compiled_scan_honors_global_skip_paths_and_source_skip_glob() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("Caches/SkipMe/Tool")).unwrap();
+        fs::create_dir_all(temp.path().join("Caches/Guarded/Tool")).unwrap();
+        fs::create_dir_all(temp.path().join("Caches/Plain/Tool")).unwrap();
+        let json = format!(
+            r#"{{"version":"test",
+                "protection":{{"skipPaths":["{}/Caches/SkipMe"]}},
+                "rules":[
+                    {{"path":"{}","deep":2,"filters":[{{"name":"Tool"}}]}},
+                    {{"type":"protect","title":"p","items":[{{"path":"{}/Caches/Guard*","why":"用户数据","scan":false}}]}}
+                ]}}"#,
+            temp.path().display(),
+            temp.path().join("Caches").display(),
+            temp.path().display()
+        );
+        let doc: RuleDoc = serde_json::from_str(&json).unwrap();
+        doc.validate().unwrap();
+        let mut scanner = Scanner::new(doc).unwrap();
+        scanner.scan_target(&AppContext::bundle_id("com.example.Tool"));
+        let paths: HashSet<PathBuf> = scanner.items.iter().map(|item| item.path.clone()).collect();
+        assert_eq!(
+            paths,
+            HashSet::from([temp.path().join("Caches/Plain/Tool")])
+        );
+    }
+
+    #[test]
+    fn compiled_scan_root_in_skip_paths_still_matches_at_depth_zero() {
+        let temp = tempfile::tempdir().unwrap();
+        let caches = temp.path().join("Caches");
+        fs::create_dir_all(&caches).unwrap();
+        let json = format!(
+            r#"{{"version":"test",
+                "protection":{{"skipPaths":["{}"]}},
+                "rules":[{{"path":"{}","deep":0,"filters":[{{"deep":0,"name":"Caches"}}]}}]}}"#,
+            caches.display(),
+            caches.display()
+        );
+        let doc: RuleDoc = serde_json::from_str(&json).unwrap();
+        doc.validate().unwrap();
+        let mut scanner = Scanner::new(doc).unwrap();
+        scanner.scan_target(&AppContext::bundle_id("com.example.Tool"));
+        let paths: Vec<PathBuf> = scanner.items.iter().map(|item| item.path.clone()).collect();
+        assert_eq!(paths, vec![caches]);
     }
 
     #[test]
@@ -386,7 +445,7 @@ mod tests {
             target.display()
         );
         let mut scanner = scanner_with(&format!("{rules}}},{{{protect}"));
-        scanner.scan_app(&AppContext::bundle_id("com.example.Tool"));
+        scanner.scan_target(&AppContext::bundle_id("com.example.Tool"));
         assert_eq!(scanner.items.len(), 1);
         scanner.post_process(false);
         assert!(!scanner.items[0].deletable);
@@ -415,7 +474,7 @@ mod tests {
             child.display()
         );
         let mut scanner = scanner_with(&format!("{yes}}},{{{ask}}},{{{no}"));
-        scanner.scan_app(&AppContext::bundle_id("com.example.Tool"));
+        scanner.scan_target(&AppContext::bundle_id("com.example.Tool"));
         assert_eq!(scanner.items.len(), 3);
         scanner.post_process(false);
         // 同路径合并成一项，子项折叠进父项，no 最保守
@@ -442,7 +501,7 @@ mod tests {
             toolbox.display()
         );
         let mut scanner = scanner_with(&rules);
-        scanner.scan_app(&AppContext::bundle_id("com.example.Tool"));
+        scanner.scan_target(&AppContext::bundle_id("com.example.Tool"));
         assert_eq!(scanner.items.len(), 2);
         scanner.post_process(false);
         assert_eq!(scanner.items.len(), 2);
@@ -501,17 +560,9 @@ mod tests {
                 "items":[{"path":"/Applications/Tool.app","what":"本体"}]"#,
         );
         doc.validate().unwrap();
-        let mut blocked = 0;
-        for entry in &doc.rules {
-            let RuleEntry::Source(rule) = entry else {
-                continue;
-            };
-            if rule.uninstaller.is_some()
-                && rule.matches_app(&AppContext::bundle_id("com.example.Tool"))
-            {
-                blocked += 1;
-            }
-        }
-        assert_eq!(blocked, 1);
+        let error =
+            check_source_uninstaller(&doc, &AppContext::bundle_id("com.example.Tool")).unwrap_err();
+        assert!(error.to_string().contains("Tool Uninstaller"));
+        assert!(check_source_uninstaller(&doc, &AppContext::bundle_id("com.other.App")).is_ok());
     }
 }

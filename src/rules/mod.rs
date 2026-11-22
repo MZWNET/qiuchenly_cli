@@ -157,31 +157,15 @@ pub fn expand_path(p: &str) -> PathBuf {
     PathBuf::from(p)
 }
 
-fn save_rules(doc: &RuleDoc, origin: &str) -> Result<()> {
+fn save_document(mut value: serde_json::Value, version: &str, origin: &str) -> Result<()> {
     let p = rules_path()?;
     if let Some(parent) = p.parent() {
         fs::create_dir_all(parent)?;
     }
-    let mut out = serde_json::to_value(doc)?;
-    if let Some(obj) = out.as_object_mut() {
+    if let Some(obj) = value.as_object_mut() {
         obj.insert("origin".into(), serde_json::json!(origin));
     }
-    fs::write(&p, serde_json::to_string_pretty(&out)?)?;
-    println!("规则已保存: {} (version {})", p.display(), doc.version);
-    Ok(())
-}
-
-/// 云端合成文档按原样保存，不经过模型重新序列化
-fn save_raw(document: &str, version: &str, origin: &str) -> Result<()> {
-    let p = rules_path()?;
-    if let Some(parent) = p.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let mut out: serde_json::Value = serde_json::from_str(document)?;
-    if let Some(obj) = out.as_object_mut() {
-        obj.insert("origin".into(), serde_json::json!(origin));
-    }
-    fs::write(&p, serde_json::to_string_pretty(&out)?)?;
+    fs::write(&p, serde_json::to_string_pretty(&value)?)?;
     println!("规则已保存: {} (version {})", p.display(), version);
     Ok(())
 }
@@ -204,7 +188,7 @@ pub async fn sync() -> Result<()> {
     let document = client.compose_uninstall_rules(&ids).await?;
     let doc: RuleDoc = serde_json::from_str(&document).context("解析合成的规则文档失败")?;
     doc.validate().context("合成的规则文档未通过校验")?;
-    save_raw(&document, &doc.version, "server")
+    save_document(serde_json::from_str(&document)?, &doc.version, "server")
 }
 
 pub fn show() -> Result<()> {
@@ -246,7 +230,7 @@ pub fn show() -> Result<()> {
 
 pub fn reset() -> Result<()> {
     let doc: RuleDoc = serde_json::from_str(DEFAULT_RULES)?;
-    save_rules(&doc, "builtin")
+    save_document(serde_json::to_value(&doc)?, &doc.version, "builtin")
 }
 
 #[cfg(test)]

@@ -44,6 +44,12 @@ pub struct SelectionArgs {
 }
 
 #[derive(Args)]
+pub struct ChannelArgs {
+    #[arg(long, default_value = "default", help = "指定商店渠道，默认官方渠道")]
+    pub channel: String,
+}
+
+#[derive(Args)]
 pub struct InstallArgs {
     pub app: String,
     #[arg(long)]
@@ -64,6 +70,8 @@ pub struct InstallArgs {
     pub language: Option<String>,
     #[command(flatten)]
     pub transfer: TransferArgs,
+    #[command(flatten)]
+    pub channel: ChannelArgs,
 }
 
 #[derive(Subcommand)]
@@ -73,6 +81,8 @@ pub enum Command {
         query: String,
         #[command(flatten)]
         page: PageArgs,
+        #[command(flatten)]
+        channel: ChannelArgs,
     },
     /// 浏览应用分类
     Categories {
@@ -81,17 +91,23 @@ pub enum Command {
         query: Option<String>,
         #[command(flatten)]
         page: PageArgs,
+        #[command(flatten)]
+        channel: ChannelArgs,
     },
     /// 查看应用详情
     Info {
         app: String,
         #[arg(long, help = "显示全部官方版本，默认显示前五个")]
         versions: bool,
+        #[command(flatten)]
+        channel: ChannelArgs,
     },
     /// 列出已安装应用
     List {
         #[arg(long, help = "列出所有本地应用，默认只列出商店中的已安装应用")]
         all: bool,
+        #[command(flatten)]
+        channel: ChannelArgs,
     },
     /// 查看已安装应用的商店更新
     Outdated {
@@ -99,11 +115,14 @@ pub enum Command {
         apps: Vec<String>,
         #[arg(long, help = "自动选择版本时包含测试版")]
         beta: bool,
+        #[command(flatten)]
+        channel: ChannelArgs,
     },
     /// 查看热门下载
-    Popular,
-    /// 检查图形应用商店的更新
-    StoreVersion { current_version: String },
+    Popular {
+        #[command(flatten)]
+        channel: ChannelArgs,
+    },
     /// 下载应用或输出下载链接
     Download {
         app: String,
@@ -121,6 +140,8 @@ pub enum Command {
         url: bool,
         #[command(flatten)]
         output: OutputArgs,
+        #[command(flatten)]
+        channel: ChannelArgs,
     },
     /// 下载并安装应用
     Install(InstallArgs),
@@ -153,45 +174,44 @@ pub enum Command {
     Whoami,
     /// 退出登录
     Logout,
-    /// 浏览社区发布
-    Community {
+    /// 管理商店渠道
+    Channel {
         #[command(subcommand)]
-        action: CommunityAction,
+        action: ChannelAction,
     },
     /// 管理卸载规则
     Rules {
         #[command(subcommand)]
         action: RulesAction,
     },
-    /// 注入、还原或列出支持的应用
+    /// 注入、还原、列出或更新支持的应用
     Inject {
-        #[arg(required_unless_present = "list", conflicts_with = "list")]
+        #[arg(
+            required_unless_present_any = ["list", "update"],
+            conflicts_with_all = ["list", "update"]
+        )]
         app: Option<String>,
-        #[arg(long, requires = "app", conflicts_with = "list")]
+        #[arg(long, requires = "app", conflicts_with_all = ["list", "update"])]
         restore: bool,
-        #[arg(long)]
+        #[arg(long, conflicts_with = "update")]
         list: bool,
+        #[arg(long)]
+        update: bool,
     },
 }
 
 #[derive(Subcommand)]
-pub enum CommunityAction {
-    /// 列出社区发布版本
-    List { app: String },
-    /// 下载社区发布
-    Download {
-        app: String,
-        #[arg(long)]
-        release: Option<String>,
-        #[arg(long, help = "自动选择发布时包含测试版")]
-        beta: bool,
-        #[arg(long)]
-        arch: Option<String>,
-        #[arg(long)]
-        attachment: bool,
-        #[command(flatten)]
-        output: OutputArgs,
+pub enum ChannelAction {
+    /// 列出渠道
+    List,
+    /// 添加自定义渠道
+    Add {
+        name: String,
+        #[arg(value_name = "BASE_URL")]
+        base_url: String,
     },
+    /// 移除自定义渠道
+    Remove { name: String },
 }
 
 #[derive(Subcommand)]
