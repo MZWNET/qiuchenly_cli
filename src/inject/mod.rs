@@ -1,4 +1,5 @@
 mod config;
+mod elevate;
 mod macho;
 mod signing;
 
@@ -40,6 +41,51 @@ fn injection_target(config: &AppConfig, app: &InstalledApp) -> Option<PathBuf> {
             )
             .join(file),
     )
+}
+
+fn ensure_not_mas(app: &InstalledApp) -> Result<()> {
+    if app.path.join("Contents/_MASReceipt/receipt").is_file() {
+        bail!(
+            "App Store 版本受 macOS 防篡改保护，无法注入或还原: {}\n请先移除该应用并通过商店 precracked 包安装后再试",
+            app.path.display()
+        );
+    }
+
+    Ok(())
+}
+
+fn requires_elevation(app: &InstalledApp, files: &[PathBuf]) -> bool {
+    files.iter().any(|file| !file_writable(file))
+        || files
+            .iter()
+            .filter_map(|file| file.parent())
+            .any(|dir| !dir_creatable(dir))
+        || !dir_creatable(&app.path.join("Contents"))
+}
+
+fn file_writable(file: &Path) -> bool {
+    if !file.exists() {
+        return true;
+    }
+    fs::OpenOptions::new().write(true).open(file).is_ok()
+}
+
+fn dir_creatable(dir: &Path) -> bool {
+    if !dir.exists() {
+        return true;
+    }
+    let probe = dir.join(".qiuchenly-probe");
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe)
+    {
+        Ok(_) => {
+            let _ = fs::remove_file(&probe);
+            true
+        }
+        Err(_) => false,
+    }
 }
 
 pub fn list() -> Result<()> {
@@ -133,7 +179,23 @@ pub async fn update(aria2c: PathBuf) -> Result<()> {
 }
 
 pub fn inject_app(bundle_id: &str) -> Result<()> {
+    elevate_on_permission_denied(|| inject_app_inner(bundle_id))
+}
+
+fn elevate_on_permission_denied(action: impl FnOnce() -> Result<()>) -> Result<()> {
+    match action() {
+        Err(error) if !elevate::is_root() && elevate::is_permission_denied(&error) => {
+            eprintln!("{error:?}");
+            println!("尝试请求管理员权限重试...");
+            elevate::run_elevated()
+        }
+        result => result,
+    }
+}
+
+fn inject_app_inner(bundle_id: &str) -> Result<()> {
     let (config, app) = locate(bundle_id)?;
+    ensure_not_mas(&app)?;
     if !config.allows_version(&app.version) {
         bail!(
             "版本 {} 不在 supportVersion/supportSubVersion 允许范围",
@@ -169,6 +231,11 @@ pub fn inject_app(bundle_id: &str) -> Result<()> {
         targets
     };
 
+    if !elevate::is_root() && requires_elevation(&app, &targets) {
+        println!("{} 需要管理员权限才能写入", app.path.display());
+
+        return elevate::run_elevated();
+    }
     println!("注入 {} ...", app.path.display());
     for target in &targets {
         let mut backup_name = target.as_os_str().to_owned();
@@ -214,7 +281,12 @@ pub fn inject_app(bundle_id: &str) -> Result<()> {
 }
 
 pub fn restore_app(bundle_id: &str) -> Result<()> {
+    elevate_on_permission_denied(|| restore_app_inner(bundle_id))
+}
+
+fn restore_app_inner(bundle_id: &str) -> Result<()> {
     let (config, app) = locate(bundle_id)?;
+    ensure_not_mas(&app)?;
     let mut directories = vec![
         app.path.join("Contents/Frameworks"),
         app.path.join("Contents/MacOS"),
@@ -225,7 +297,7 @@ pub fn restore_app(bundle_id: &str) -> Result<()> {
             directories.push(directory.to_path_buf());
         }
     }
-    let mut restored = 0;
+    let mut pairs = Vec::new();
     for directory in directories {
         let entries = match fs::read_dir(&directory) {
             Ok(entries) => entries,
@@ -238,15 +310,24 @@ pub fn restore_app(bundle_id: &str) -> Result<()> {
             let backup = entry?.path();
             if backup.extension() == Some(OsStr::new("backup")) {
                 let original = backup.with_extension("");
-                fs::copy(&backup, &original).with_context(|| {
-                    format!("从 {} 还原 {}", backup.display(), original.display())
-                })?;
-                fs::remove_file(&backup)
-                    .with_context(|| format!("删除已还原的备份 {}", backup.display()))?;
-                restored += 1;
-                println!("已还原: {}", original.display());
+                pairs.push((backup, original));
             }
         }
+    }
+    let originals: Vec<PathBuf> = pairs.iter().map(|(_, original)| original.clone()).collect();
+    if !elevate::is_root() && requires_elevation(&app, &originals) {
+        println!("{} 需要管理员权限才能写入", app.path.display());
+
+        return elevate::run_elevated();
+    }
+    let mut restored = 0;
+    for (backup, original) in &pairs {
+        fs::copy(backup, original)
+            .with_context(|| format!("从 {} 还原 {}", backup.display(), original.display()))?;
+        fs::remove_file(backup)
+            .with_context(|| format!("删除已还原的备份 {}", backup.display()))?;
+        restored += 1;
+        println!("已还原: {}", original.display());
     }
     if restored == 0 {
         println!("{bundle_id} 没有找到备份");

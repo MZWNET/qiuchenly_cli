@@ -96,13 +96,23 @@ impl Cli {
                 } else if list {
                     inject::list()
                 } else {
-                    let app =
-                        app.expect("clap requires an app unless --list or --update is supplied");
-                    if restore {
-                        inject::restore_app(&app)
-                    } else {
-                        inject::inject_app(&app)
+                    let mut failed = Vec::new();
+                    for bundle_id in &app {
+                        let result = if restore {
+                            inject::restore_app(bundle_id)
+                        } else {
+                            inject::inject_app(bundle_id)
+                        };
+                        if let Err(error) = result {
+                            eprintln!("{error:?}\n");
+                            failed.push(bundle_id.clone());
+                        }
                     }
+                    if !failed.is_empty() {
+                        eprintln!("失败 {} 个: {}", failed.len(), failed.join(", "));
+                        std::process::exit(1);
+                    }
+                    Ok(())
                 }
             }
         }

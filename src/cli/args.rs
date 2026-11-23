@@ -190,7 +190,8 @@ pub enum Command {
             required_unless_present_any = ["list", "update"],
             conflicts_with_all = ["list", "update"]
         )]
-        app: Option<String>,
+        /// 要注入或还原的应用，可指定多个
+        app: Vec<String>,
         #[arg(long, requires = "app", conflicts_with_all = ["list", "update"])]
         restore: bool,
         #[arg(long, conflicts_with = "update")]
