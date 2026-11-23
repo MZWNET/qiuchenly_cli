@@ -193,13 +193,13 @@ pub enum Command {
         app: Option<String>,
         #[arg(long, requires = "app", conflicts_with_all = ["list", "update"])]
         restore: bool,
-       #[arg(long, conflicts_with = "update")]
-       list: bool,
-       #[arg(long)]
-       update: bool,
+        #[arg(long, conflicts_with = "update")]
+        list: bool,
+        #[arg(long)]
+        update: bool,
         #[command(flatten)]
         transfer: TransferArgs,
-   },
+    },
 }
 
 #[derive(Subcommand)]
