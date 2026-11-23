@@ -72,7 +72,7 @@ pub fn list() -> Result<()> {
     Ok(())
 }
 
-pub async fn update() -> Result<()> {
+pub async fn update(aria2c: PathBuf) -> Result<()> {
     let cached = config::load_cached()?;
     let current_version = cached
         .as_ref()
@@ -101,7 +101,7 @@ pub async fn update() -> Result<()> {
         );
     }
     let temp = tempfile::tempdir().context("创建临时目录")?;
-    let downloader = crate::packages::aria2::Downloader::new(PathBuf::from("aria2c"));
+    let downloader = crate::packages::aria2::Downloader::new(aria2c);
     let dmg = downloader
         .download(
             &response.download_url,

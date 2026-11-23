@@ -89,9 +89,10 @@ impl Cli {
                 restore,
                 list,
                 update,
+                transfer,
             } => {
                 if update {
-                    inject::update().await
+                    inject::update(transfer.aria2c).await
                 } else if list {
                     inject::list()
                 } else {

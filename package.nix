@@ -1,12 +1,19 @@
 {
   lib,
   rustPlatform,
+  makeWrapper,
+  aria2,
 }:
 rustPlatform.buildRustPackage {
   pname = "qiuchenly-cli";
   inherit ((lib.importTOML ./Cargo.toml).package) version;
 
   preBuild = "unset AWS_LC_SYS_USE_SYSTEM LIBSQLITE3_SYS_USE_PKG_CONFIG";
+  nativeBuildInputs = [ makeWrapper ];
+  postFixup = ''
+    wrapProgram $out/bin/qiuchenly \
+      --prefix PATH : ${lib.makeBinPath [ aria2 ]}
+  '';
 
   src = lib.fileset.toSource {
     root = ./.;
