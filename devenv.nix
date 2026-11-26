@@ -8,10 +8,14 @@
   git-hooks.hooks = {
     rustfmt.enable = true;
     clippy.enable = true;
-    alejandra.enable = true;
+    alejandra = {
+      enable = true;
+      excludes = ["^Cargo\\.nix$"];
+    };
   };
 
   packages = with pkgs; [
+    crate2nix
     openssl
     pkg-config
   ];
@@ -23,5 +27,6 @@
     clippy-driver --version
     rust-analyzer --version
     alejandra --version
+    crate2nix --version
   '';
 }
